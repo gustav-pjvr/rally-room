@@ -6,9 +6,12 @@ import { Link, type LinkState } from './net';
 import { Motion } from './motion';
 import { RacketFace } from './racket';
 import {
-  SWEET_SPOT_A, asGameState, asMode, hapticPattern, isYourMove, mergeYou, pidFor, promptFor, screenFor, spinWord,
+  SWEET_SPOT_A, asGameState, asMode, hapticPattern, isYourMove, mergeYou, pidFor, promptFor,
+  calibrationForJoin, sameKey, saveCalibration, screenFor, spinWord, stepName, teachAvailable,
   type GameState, type PhoneMode, type Screen, type You,
 } from './logic';
+import { STEPS, SWINGS_PER_STEP, Teacher, handSide, isCalibrated } from '../shared/calibration';
+import { wireSwing } from '../shared/swing';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const PREFS_KEY = 'rally-room-player-v1';
@@ -38,6 +41,13 @@ let chosen = { hand: 'Right', colour: '#0F4C5C' };
 let batch: RawSample[] = [];
 let missTimer: ReturnType<typeof setTimeout> | undefined;
 let countdown: ReturnType<typeof setInterval> | undefined;
+/** The joined player's name: spin calibrations are kept per name on this phone. */
+let playerName = '';
+/** The spin teaching flow while it runs (lobby only), and whether its result is showing. */
+let teacher: Teacher | null = null;
+let teachShowingResult = false;
+/** The detector's sensor mode as last rendered, so the teach card follows it (gyro or not). */
+let lastSensorMode = 'starting';
 
 const playFace = new RacketFace($<HTMLCanvasElement>('play-racket'), { aspect: 0.62 });
 const lobbyFace = new RacketFace($<HTMLCanvasElement>('lobby-racket'));
@@ -74,6 +84,7 @@ function renderLobby() {
   $('lobby-kicker').textContent = lab ? 'Sensor lab' : you.player ? `You are player ${you.player}` : 'You are in';
   $('lobby-team-name').textContent = you.team ?? 'Your racket';
   $('lobby-status').textContent = lab ? 'Streaming motion to the sensor lab' : 'Waiting for the host to start';
+  renderTeach();
 }
 
 function renderHud() {
@@ -132,9 +143,16 @@ $<HTMLFormElement>('join-form').addEventListener('submit', (e) => {
   if (!form.reportValidity()) return;
   const data = new FormData(form);
   const name = String(data.get('name') || '').trim();
+  const handChanged = String(data.get('hand') || 'Right') !== chosen.hand;
   chosen = { hand: String(data.get('hand') || 'Right'), colour: String(data.get('colour') || '#0F4C5C') };
   for (const face of [playFace, lobbyFace]) face.setLeftHanded(chosen.hand === 'Left');
   try { localStorage.setItem(PREFS_KEY, JSON.stringify({ name, ...chosen })); } catch { /* private mode */ }
+  // Each player's own spin calibration on this phone; another name starts on the fixed rule. The same
+  // player rejoining keeps the calibration in memory (it may not have been savable), and teaching is
+  // cancelled only for another player or another hand (the steps expect the turn direction of the hand).
+  if (!sameKey(name, playerName) || handChanged) { stopTeach(); teachShowingResult = false; }
+  motion.detector.calibration = calibrationForJoin(playerName, name, motion.detector.calibration, storage);
+  playerName = name;
   $('join-error').hidden = true;
   joinPending(true);
   const room = roomInput.value.toUpperCase();
@@ -224,6 +242,8 @@ function onMessage(m: WireMessage) {
       if (!next) break;
       mode = next;
       batch = [];
+      // Teaching only runs in the lobby: a match or the lab ends it unsaved.
+      if (mode !== 'lobby') { stopTeach(); teachShowingResult = false; }
       if (screen === 'lobby' || screen === 'play') route();
       break;
     }
@@ -295,18 +315,27 @@ const motion = new Motion({
     $('allow-message').textContent = 'No motion data arrived. Check that motion sensors are allowed for this browser, or try another browser.';
   },
   raw(sample) {
+    // The teach card needs a gyroscope: show or hide it as soon as the sensor mode is known.
+    if (motion.detector.sensorMode !== lastSensorMode) { lastSensorMode = motion.detector.sensorMode; renderTeach(); }
     if (mode !== 'lab') return;
     batch.push(sample);
     if (batch.length >= 4) { link.send({ t: 'raw', s: batch }); batch = []; }
   },
   swing(swing) {
-    link.send({ ...swing });
+    link.send({ ...wireSwing(swing) });
     link.send({ t: 'profile', ...motion.detector.report() });
     if (screen !== 'lobby') return;
     const power = swing.power;
     $<HTMLMeterElement>('power').value = power;
     $('power-value').textContent = `${Math.round(power * 100)}%`;
-    $('spin-word').textContent = spinWord(swing.spin);
+    $('spin-word').textContent = teacher ? 'Learning' : spinWord(swing.spin);
+    if (teacher && mode === 'lobby') {
+      // Only swings the expected way round count; a follow-through the other way is ignored.
+      if (teacher.add(swing.dir, swing.path, swing.face)) {
+        if (teacher.done) finishTeach();
+        else renderTeach();
+      }
+    }
     // Practice swings have no ball: the ripple starts at the sweet spot, nudged toward the top edge for topspin.
     lobbyFace.hit(SWEET_SPOT_A, swing.spin * 0.5, 0.35 + 0.65 * power);
   },
@@ -343,6 +372,94 @@ allowButton.addEventListener('click', async () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && motionAsked) void motion.keepAwake().then(wakeNote);
 });
+
+// Spin calibration (DESIGN.md section 4): optional, lobby only, kept per player name on this phone.
+
+function renderTeach() {
+  const card = $('teach');
+  card.hidden = !teachAvailable(mode, motion.detector.sensorMode);
+  document.body.dataset.teach = card.hidden ? 'off' : teacher ? 'step' : teachShowingResult ? 'done' : 'idle';
+  if (card.hidden) return;
+  const view = document.body.dataset.teach;
+  $('teach-idle').hidden = view !== 'idle';
+  $('teach-step').hidden = view !== 'step';
+  $('teach-done').hidden = view !== 'done';
+  if (view === 'idle') {
+    const calibrated = isCalibrated(motion.detector.calibration);
+    card.dataset.calibrated = String(calibrated);
+    $('teach-heading').textContent = calibrated ? `Spin taught for ${playerName}` : 'Teach your racket your spin';
+    $('teach-state').textContent = calibrated ? 'calibrated' : 'automatic';
+    $('teach-hint').textContent = calibrated ? '' : ' \u00b7 18 swings, about a minute';
+    $('teach-start').textContent = calibrated ? 'Recalibrate' : 'Teach your racket';
+  }
+  if (view === 'step' && teacher?.current) {
+    const { side, kind } = teacher.current;
+    const count = teacher.count;
+    $('teach-count').textContent = `Step ${teacher.step + 1} of ${STEPS.length}`;
+    $('teach-title').textContent = stepName(side, kind);
+    $('teach-progress').textContent = count === 0
+      ? `Swing ${SWINGS_PER_STEP} times`
+      : `${count} of ${SWINGS_PER_STEP} swings`;
+    $('teach').querySelectorAll('.dots > span').forEach((dot, i) => dot.classList.toggle('on', i < count));
+    const redo = $<HTMLButtonElement>('teach-redo');
+    redo.textContent = teacher.redoLabel;
+    redo.disabled = !teacher.canRedo;
+  }
+}
+
+function startTeach() {
+  teacher = new Teacher(chosen.hand === 'Left');
+  teachShowingResult = false;
+  $('spin-word').textContent = 'Learning';
+  renderTeach();
+  $('teach-title').focus();
+}
+
+function stopTeach() {
+  if (!teacher) return;
+  teacher = null;
+  $('spin-word').textContent = 'swing to see';
+}
+
+function finishTeach() {
+  if (!teacher) return;
+  const fresh = teacher.result();
+  const old = motion.detector.calibration;
+  teacher = null;
+  // A side whose swings were too alike keeps what it had before.
+  const cal = { ...fresh, fh: fresh.fh ?? old?.fh ?? null, bh: fresh.bh ?? old?.bh ?? null };
+  let title: string, note: string;
+  if (fresh.fh && fresh.bh) {
+    title = `Spin calibrated for ${playerName}`;
+    note = 'Your next swing uses it.';
+  } else if (fresh.fh || fresh.bh) {
+    // fresh.fh and fresh.bh are physical sides; a left-hander's forehand turns the other way.
+    const goodSide = fresh.fh ? 'fh' : 'bh';
+    const forehand = handSide(goodSide, chosen.hand === 'Left') === 'fh';
+    const good = forehand ? 'Forehand' : 'Backhand', weak = forehand ? 'backhand' : 'forehand';
+    title = `${good} spin calibrated for ${playerName}`;
+    note = `Your ${weak} swings were too alike to tell apart, so the ${weak} stays as it was.`;
+  } else {
+    title = 'Spin stays as it was';
+    note = 'The three kinds of swing were too alike to tell apart. Try again and make each one clearly different.';
+  }
+  if (isCalibrated(cal)) {
+    motion.detector.calibration = cal;
+    if (!saveCalibration(playerName, cal, storage)) note += ' This browser cannot save it, so it lasts until you close the page.';
+    link.send({ t: 'profile', ...motion.detector.report() });
+  }
+  teachShowingResult = true;
+  $('teach-result').textContent = title;
+  $('teach-result-note').textContent = note;
+  $('spin-word').textContent = 'swing to see';
+  renderTeach();
+  $('teach-result').focus();
+}
+
+$('teach-start').addEventListener('click', startTeach);
+$('teach-redo').addEventListener('click', () => { teacher?.redo(); renderTeach(); });
+$('teach-skip').addEventListener('click', () => { stopTeach(); renderTeach(); $('teach-start').focus(); });
+$('teach-ok').addEventListener('click', () => { teachShowingResult = false; renderTeach(); $('teach-start').focus(); });
 
 applyColour();
 show('join');

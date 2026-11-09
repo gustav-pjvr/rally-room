@@ -248,7 +248,42 @@ in order through one detector in `tests/spin.test.ts`):
   instead of the peak did not generalise across sessions; a separate backhand
   neutral point did not help overall. Adding the racket-face angle at contact
   plus a player's own labelled examples reached about 90% (left one out, per
-  session): that needs a short spin calibration with labels (offered, not built).
+  session): that needs a short spin calibration with labels, built as below.
+
+**Spin calibration (optional, per player and phone).** Code:
+`src/shared/calibration.ts` (pure), tests `tests/calibration.test.ts`.
+- Two features per swing at the peak: `path` (the upward head path above,
+  before the neutral point) and `face = up.z * dir` (the screen normal's upward
+  part). Phone only: `wireSwing` strips them before the swing is sent. Both
+  are NaN without a gyroscope, so such swings are never used for teaching.
+- Teaching, in the phone lobby only, and only on a phone whose gyroscope is
+  confirmed (the card is hidden in accelerometer mode and until the mode is
+  known): six steps (forehand slice, flat, topspin, then backhand), three
+  swings each. A swing the other way round is ignored. The player's hand
+  decides which way the strokes turn: a left-hander's forehand steps expect
+  the turn direction `dir` -1 and the backhand steps +1. Features and storage
+  keep the physical side (`dir` +1 is `fh`, -1 is `bh`), so the swing at play
+  time reads the same side its calibration was stored under. "Redo" goes back
+  one step at most: after a go-back it reads "Redo this step" until that step
+  is finished, so redo and swing cycles never reach an earlier step.
+- Fit: per side, the class means of the three kinds, standardised by the
+  pooled within-class standard deviation; a side needs two swings of every
+  kind and distinct means, else it stays on the fixed rule.
+- Spin: the arm is the nearer of the topspin and slice means by distance in
+  the standardised space (so the word is the nearest class mean, also when the
+  arms are unequal or not opposite, and each class mean reads its own sign).
+  Along that arm, with 0 at the flat mean and 1 at the class mean: halfway
+  +-0.2 (the word boundary), class mean +-0.6, then linear, clamped to +-1.
+- Saved under `localStorage['rally-room-calibration-v1']`, a map from the
+  trimmed lower-case player name to the calibration; another name on the same
+  phone starts on the fixed rule. A rejoin under the same name keeps the
+  calibration in memory (it may not have been saved); it is reloaded only when
+  the name key changes.
+- Measured (calibrate on the first three swings of each kind, score the rest
+  of the same session): 81% against 71% for the fixed rule on the same 84
+  swings (session 0: 83 vs 71, forehand session: 96 vs 78, backhand session:
+  67 vs 67, where the player's flat drifted during the session). Calibrated
+  on one session and scored on another: 76% against 71%.
 
 ## 4a. Automatic phone setup (no setup screen)
 
@@ -262,7 +297,7 @@ recording as if made on differently behaved phones (`tests/profile.test.ts`).
 | Rotation axis order and signs | `AxisCalibrator`: after each still, move, still, it integrates the gyro under all 48 orders and signs and keeps the one that carries gravity from the first pose to the second. Until it is sure (6 moves, best mean error under 40 degrees, 12 better than the runner-up) the platform default is used | Scrambled and flipped axes: exact inverse found after about 60 s of play |
 | deg/s or rad/s | `UnitsGuess`: a pull over 25 m/s² only happens in a real swing (several hundred deg/s); if the reading is then under 40, it is rad/s | Found after about 7 s |
 | Accelerometer sign, how the phone sits in the hand | `RacketAxisLearner`: the swing pulls the phone away from the wrist, so the accelerometer minus gravity points back to the wrist; the racket is the other way. Averaged over swings, it absorbs grip and a flipped accelerometer | Flipped accelerometer: identical spin results |
-| The player's own swing style | Not corrected automatically. A running median offset was tried and removed (section 4: it erased a player's habitual spin). A fixed neutral point (+0.05) is used instead | 73% correct spin over 120 labelled swings |
+| The player's own swing style | Not corrected automatically. A running median offset was tried and removed (section 4: it erased a player's habitual spin). A fixed neutral point (+0.05) is used, unless the player teaches the phone their spin in the lobby (section 4, "Spin calibration") | 73% correct spin over 120 labelled swings; 81% with the calibration on the swings after it |
 | Gyro that tops out early | `SaturationWatch`: three swings at the same top; thresholds then scale to that top | 500 deg/s gyro: swings found, spin degraded to 57% |
 | No gyroscope | Accelerometer-only mode after 60 samples with no rotation rate: turn rate estimated from the pull (a = w² r, r = 0.35 m), spin reads flat | Swings found, about 10% extra |
 | Sample rate | Everything uses timestamps | |
@@ -489,6 +524,8 @@ crowd swell that grows with rally length). Nothing autoplays before the first ta
 1. Join: name, left or right handed, colour; "Join".
 2. Allow motion: one big button (required tap for iOS) and the grip picture.
 3. Lobby: "Swing to test" with a power meter; your colour; status of the game.
+   A "Teach your racket your spin" card (lobby mode only) runs the optional
+   spin calibration step by step and shows "Spin: calibrated / automatic".
    "You are player N" while the phone plays in the next match; a phone that
    is told `player: null` loses the number (it watches).
 4. In play: the racket face (strings, frame, team colour) filling the screen,

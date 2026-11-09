@@ -1,4 +1,5 @@
 // Pure helpers for the phone controller: no DOM, unit tested in tests/phone/logic.test.ts.
+import { asCalibration, playerKey, type Calibration, type Kind, type Side } from '../shared/calibration';
 
 export type GameState = 'wait' | 'serve' | 'toss' | 'rally' | 'paused' | 'over';
 export type Screen = 'join' | 'allow' | 'lobby' | 'play' | 'gone';
@@ -83,6 +84,40 @@ export function pidFor(
   const pid = make();
   try { storage.setItem(pidKey(room), pid); } catch { /* private mode: this page keeps it in memory */ }
   return pid;
+}
+
+/** localStorage key of the spin calibrations on this phone: a map from player name to Calibration. */
+export const CALIBRATION_KEY = 'rally-room-calibration-v1';
+type Store = { getItem(key: string): string | null; setItem(key: string, value: string): void };
+
+function readCalibrations(storage: Store): Record<string, unknown> {
+  try {
+    const all = JSON.parse(storage.getItem(CALIBRATION_KEY) || 'null');
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch { return {}; }
+}
+
+/** The spin calibration saved on this phone for a player name, or null (the fixed rule). */
+export function loadCalibration(name: string, storage: Store): Calibration | null {
+  const key = playerKey(name);
+  if (!key) return null;
+  const all = readCalibrations(storage);
+  return Object.prototype.hasOwnProperty.call(all, key) ? asCalibration(all[key]) : null;
+}
+
+/** Saves a player's calibration next to the others on this phone. False when storage is blocked. */
+export function saveCalibration(name: string, cal: Calibration, storage: Store): boolean {
+  const key = playerKey(name);
+  if (!key) return false;
+  try {
+    storage.setItem(CALIBRATION_KEY, JSON.stringify({ ...readCalibrations(storage), [key]: cal }));
+    return true;
+  } catch { return false; }
+}
+
+/** "Forehand slice", "Backhand topspin": one teaching step. */
+export function stepName(side: Side, kind: Kind): string {
+  return `${side === 'fh' ? 'Forehand' : 'Backhand'} ${kind === 'top' ? 'topspin' : kind}`;
 }
 
 export function spinWord(spin: number): 'Topspin' | 'Slice' | 'Flat' {
@@ -191,4 +226,23 @@ export function readableOn(colour: string, against: string, min: number, toward 
     if (contrast(candidate, bg) >= min) return toHex(candidate);
   }
   return toward;
+}
+
+/** True when two player names are the same player on this phone (the calibration storage key). */
+export function sameKey(a: string, b: string): boolean {
+  return playerKey(a) === playerKey(b);
+}
+
+/**
+ * The calibration to use after a join. The same player (same key) keeps what is in memory,
+ * so a taught calibration that could not be saved survives a rejoin; another player's is
+ * loaded from this phone's storage, or null (the fixed rule).
+ */
+export function calibrationForJoin(prevName: string, name: string, current: Calibration | null, storage: Store): Calibration | null {
+  return sameKey(prevName, name) ? current : loadCalibration(name, storage);
+}
+
+/** The teach card shows in the lobby only, and only once the gyroscope is confirmed (accel mode has no spin features). */
+export function teachAvailable(mode: PhoneMode, motionMode: 'starting' | 'gyro' | 'accel'): boolean {
+  return mode === 'lobby' && motionMode === 'gyro';
 }

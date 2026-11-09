@@ -94,6 +94,32 @@
       </div>
       <p class="spin">Spin <strong id="spin-word">swing to see</strong></p>
     </div>
+    <section id="teach" class="teach" aria-labelledby="teach-heading" hidden>
+      <div id="teach-idle" class="teach-idle">
+        <div class="teach-copy">
+          <h2 id="teach-heading" class="teach-heading">Teach your racket your spin</h2>
+          <p class="teach-meta">Spin: <strong id="teach-state">automatic</strong><span id="teach-hint"> · 18 swings, about a minute</span></p>
+        </div>
+        <button id="teach-start" class="small" type="button">Teach your racket</button>
+      </div>
+      <div id="teach-step" class="teach-step" hidden>
+        <p class="kicker" id="teach-count">Step 1 of 6</p>
+        <h2 id="teach-title" class="teach-title" tabindex="-1">Forehand slice</h2>
+        <div class="teach-progress">
+          <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <p id="teach-progress" role="status" aria-live="polite">Swing 3 times</p>
+        </div>
+        <div class="teach-actions">
+          <button id="teach-redo" class="small ghost" type="button">Redo this step</button>
+          <button id="teach-skip" class="small ghost" type="button">Skip calibration</button>
+        </div>
+      </div>
+      <div id="teach-done" class="teach-done" hidden>
+        <h2 id="teach-result" class="teach-title" tabindex="-1">Spin calibrated</h2>
+        <p id="teach-result-note" class="teach-meta" role="status"></p>
+        <button id="teach-ok" class="small" type="button">Done</button>
+      </div>
+    </section>
     <p id="lobby-status" class="status" role="status">Waiting for the host to start</p>
     <p id="lobby-wake" class="note"></p>
   </section>

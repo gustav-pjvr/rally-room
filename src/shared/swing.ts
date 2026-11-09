@@ -3,6 +3,7 @@ import {
   AxisCalibrator, IDENTITY, RacketAxisLearner, SaturationWatch, applyMap, mapKey,
   type AxisMap,
 } from './profile';
+import { fixedSpin, isCalibrated, sideOf, spinFrom, type Calibration } from './calibration';
 
 /**
  * Detector thresholds. Set from the first real-phone recording (2026-11-09):
@@ -170,6 +171,20 @@ export interface ProfileReport {
   racketSwings: number;
   spinOffset: number;
   gyroCap: number | null;
+  /** True while a player's own spin calibration is in use (src/shared/calibration.ts). */
+  spinCalibrated: boolean;
+}
+
+/**
+ * A swing as the phone sees it: the wire swing plus the two spin features the
+ * calibration uses. `path` is the upward racket-head path at the peak before
+ * the neutral point; `face` is the screen normal's upward part times `dir`.
+ * Both are NaN in accelerometer-only mode (no gyroscope). Phone only: strip them with `wireSwing` before sending.
+ */
+export type PhoneSwing = { t: 'swing' } & Swing & { path: number; face: number };
+
+export function wireSwing({ path: _path, face: _face, ...swing }: PhoneSwing): { t: 'swing' } & Swing {
+  return swing;
 }
 
 /**
@@ -189,6 +204,11 @@ export class SwingDetector {
   private readonly saturation = new SaturationWatch();
   private savedMap: AxisMap | undefined;
   private history: { t: number; accel: Vector; up: Vector }[] = [];
+  /** A player's own spin calibration; null uses the fixed rule. */
+  calibration: Calibration | null = null;
+
+  /** 'starting' until the first rotation rate (gyro) or 60 samples without one (accel). */
+  get sensorMode(): ProfileReport['mode'] { return this.mode; }
 
   constructor(saved?: SavedProfile, private readonly onLearn?: (profile: SavedProfile) => void) {
     this.calibrator = new AxisCalibrator(() => this.onLearn?.(this.save()));
@@ -220,7 +240,7 @@ export class SwingDetector {
     };
   }
 
-  sample(t: number, accel: Vector, native: Vector | null): { raw: RawSample; omega: number; swing?: { t: 'swing' } & Swing } {
+  sample(t: number, accel: Vector, native: Vector | null): { raw: RawSample; omega: number; swing?: PhoneSwing } {
     const gyro = native !== null && native.every(Number.isFinite);
     if (gyro) this.mode = 'gyro';
     else if (this.mode === 'starting' && ++this.noGyro >= SwingDetector.GYRO_GRACE) this.mode = 'accel';
@@ -249,16 +269,19 @@ export class SwingDetector {
     if (!result.swing) return { raw, omega: result.omega };
 
     const { peakRotation, peakUp, peak } = this.state;
-    let spin = 0;
+    // Without a gyroscope there are no spin features: NaN, so the spin teacher rejects these swings.
+    let spin = 0, path = NaN, face = NaN;
     if (this.mode === 'gyro') {
-      const ownSpin = features(peakRotation, peakUp, peak, tuning, this.racket.axis).spin;
-      spin = clamp((ownSpin - tuning.SPIN_NEUTRAL) * tuning.SPIN_SCALE, -1, 1);
+      path = features(peakRotation, peakUp, peak, tuning, this.racket.axis).spin;
+      face = peakUp[2] * result.swing.dir;
+      spin = spinFrom(this.calibration, sideOf(result.swing.dir), path, face,
+        fixedSpin(path, tuning.SPIN_NEUTRAL, tuning.SPIN_SCALE));
       this.racket.add(this.history.filter((h) => Math.abs(h.t - result.swing!.tp) <= 25), peakRotation);
       const before = this.saturation.cap;
       this.saturation.add(peakRotation);
       if (this.saturation.cap !== before || this.racket.count === RacketAxisLearner.MIN_SWINGS) this.onLearn?.(this.save());
     }
-    return { raw, omega: result.omega, swing: { t: 'swing', ...result.swing, spin } };
+    return { raw, omega: result.omega, swing: { t: 'swing', ...result.swing, spin, path, face } };
   }
 
   save(): SavedProfile {
@@ -280,6 +303,7 @@ export class SwingDetector {
       racketSwings: this.racket.count,
       spinOffset: this.tuning.SPIN_NEUTRAL,
       gyroCap: this.saturation.cap,
+      spinCalibrated: isCalibrated(this.calibration),
     };
   }
 }

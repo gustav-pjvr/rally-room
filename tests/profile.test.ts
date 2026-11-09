@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AxisCalibrator, RacketAxisLearner, SaturationWatch, applyMap, mapKey } from '../src/shared/profile';
 import { SwingDetector, type Vector } from '../src/shared/swing';
+import { Teacher } from '../src/shared/calibration';
 import { asPhone, loadLabelled, play, type FakePhone } from './fixtures/phones';
 
 // Gustav's labelled Samsung A32 recording, replayed as if made on phones that
@@ -63,6 +64,16 @@ describe('automatic phone setup', () => {
     expect(r.swings.length).toBeGreaterThanOrEqual(a32.swings.length * 0.9);
     expect(r.swings.length).toBeLessThanOrEqual(a32.swings.length * 1.2);
     expect(r.swings.every((s) => s.spin === 0)).toBe(true);
+  });
+
+  it('a phone with no gyro gives NaN spin features, so the spin teacher can never accept its swings', () => {
+    const r = play(asPhone(rec, { name: 'none', noGyro: true }));
+    expect(r.swings.length).toBeGreaterThan(0);
+    expect(r.swings.every((s) => Number.isNaN(s.path) && Number.isNaN(s.face))).toBe(true);
+    const t = new Teacher();
+    expect(r.swings.some((s) => t.add(s.dir, s.path, s.face))).toBe(false);
+    // With a gyro the same recording gives finite features.
+    expect(a32.swings.every((s) => Number.isFinite(s.path) && Number.isFinite(s.face))).toBe(true);
   });
 
   it('remembers what it learned, so the next game starts set up', () => {

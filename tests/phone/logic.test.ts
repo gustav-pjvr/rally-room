@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   asGameState, asMode, backoffDelay, contrast, facePoint, hapticPattern, isYourMove, nearFrame, parseHex,
   mergeYou, pidFor, pidKey, promptFor, readableOn, rippleStyle, screenFor, spinWord,
+  CALIBRATION_KEY, calibrationForJoin, loadCalibration, sameKey, saveCalibration, stepName, teachAvailable,
 } from '../../src/phone/logic';
+import { fit } from '../../src/shared/calibration';
 
 describe('phone prompts', () => {
   it('maps every game state to the prompt in DESIGN.md section 3', () => {
@@ -124,5 +126,72 @@ describe('phone id per room', () => {
   it('still works when storage throws (private mode)', () => {
     const broken = { getItem: () => { throw new Error('no'); }, setItem: () => { throw new Error('no'); } };
     expect(pidFor('ABCD', broken, () => 'fresh')).toBe('fresh');
+  });
+});
+
+describe('spin calibration storage', () => {
+  const cal = fit([
+    ...(['slice', 'flat', 'top'] as const).flatMap((kind, k) => [0, 1, 2].flatMap((i) => [
+      { side: 'fh' as const, kind, path: k * 0.4 - 0.4 + i * 0.03, face: 0.2 - k * 0.2 - i * 0.02 },
+      { side: 'bh' as const, kind, path: k * 0.4 - 0.4 - i * 0.03, face: 0.1 - k * 0.2 + i * 0.02 },
+    ])),
+  ], new Date('2026-11-09T12:00:00Z'));
+  const memory = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, m };
+  };
+
+  it('keeps one calibration per player name on the phone', () => {
+    const s = memory();
+    expect(loadCalibration('Gustav', s)).toBeNull();
+    expect(saveCalibration(' Gustav ', cal, s)).toBe(true);
+    expect(loadCalibration('gustav', s)).toEqual(cal);
+    expect(loadCalibration('Anna', s)).toBeNull();
+    expect(saveCalibration('Anna', cal, s)).toBe(true);
+    expect(Object.keys(JSON.parse(s.m.get(CALIBRATION_KEY)!))).toEqual(['gustav', 'anna']);
+    expect(loadCalibration('', s)).toBeNull();
+    expect(loadCalibration('constructor', s)).toBeNull();
+  });
+
+  it('survives blocked or broken storage', () => {
+    const blocked = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+    expect(loadCalibration('Gustav', blocked)).toBeNull();
+    expect(saveCalibration('Gustav', cal, blocked)).toBe(false);
+    const s = memory();
+    s.setItem(CALIBRATION_KEY, '{not json');
+    expect(loadCalibration('Gustav', s)).toBeNull();
+    expect(saveCalibration('Gustav', cal, s)).toBe(true);
+    s.setItem(CALIBRATION_KEY, JSON.stringify({ gustav: { v: 1, fh: 'x', bh: null, at: '' } }));
+    expect(loadCalibration('Gustav', s)).toBeNull();
+  });
+
+  it('shows the teach card only in the lobby and only once the gyroscope is confirmed', () => {
+    expect(teachAvailable('lobby', 'gyro')).toBe(true);
+    expect(teachAvailable('lobby', 'starting')).toBe(false);
+    expect(teachAvailable('lobby', 'accel')).toBe(false);
+    expect(teachAvailable('play', 'gyro')).toBe(false);
+    expect(teachAvailable('lab', 'gyro')).toBe(false);
+  });
+
+  it('keeps an unsaved in-memory calibration on a rejoin with the same name', () => {
+    const blocked = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+    // Storage is blocked, so a reload would find nothing and drop the calibration taught this session.
+    expect(calibrationForJoin('Gustav', 'Gustav', cal, blocked)).toBe(cal);
+    expect(calibrationForJoin('Gustav', '  gustav ', cal, blocked)).toBe(cal);
+    expect(sameKey('Gustav', ' GUSTAV ')).toBe(true);
+    expect(sameKey('Gustav', 'Anna')).toBe(false);
+  });
+
+  it('loads a saved calibration when the name changes, and starts automatic for a new name', () => {
+    const s = memory();
+    saveCalibration('Gustav', cal, s);
+    expect(calibrationForJoin('', 'Gustav', null, s)).toEqual(cal);
+    expect(calibrationForJoin('Anna', 'Gustav', null, s)).toEqual(cal);
+    expect(calibrationForJoin('Gustav', 'Anna', cal, s)).toBeNull();
+  });
+
+  it('names the steps', () => {
+    expect(stepName('fh', 'slice')).toBe('Forehand slice');
+    expect(stepName('bh', 'top')).toBe('Backhand topspin');
   });
 });

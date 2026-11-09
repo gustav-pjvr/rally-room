@@ -1,6 +1,6 @@
 // Motion permission, the devicemotion stream into the SwingDetector, and the screen wake lock.
-import type { RawSample, Swing } from '../shared/protocol';
-import { SwingDetector, type ProfileReport, type SavedProfile } from '../shared/swing';
+import type { RawSample } from '../shared/protocol';
+import { SwingDetector, type PhoneSwing, type ProfileReport, type SavedProfile } from '../shared/swing';
 
 const PROFILE_KEY = 'rally-room-profile-v1';
 
@@ -14,7 +14,8 @@ export interface MotionEvents {
   /** Nothing arrived within 3.5 s of allowing motion. */
   silent(): void;
   raw(sample: RawSample): void;
-  swing(swing: { t: 'swing' } & Swing): void;
+  /** Carries the phone-only spin features; send it with `wireSwing`. */
+  swing(swing: PhoneSwing): void;
   learned(report: ProfileReport): void;
 }
 

@@ -61,7 +61,7 @@ const net = hostConnection(async m => {
     const mode = r.mode === 'accel' ? 'no gyro, accelerometer only' : r.mode;
     const cap = r.gyroCap ? ` Gyro tops out at ${Math.round(r.gyroCap)} deg/s.` : '';
     line.textContent = `Phone setup: ${mode}. Axes ${r.axes} ${r.axesLearned ? 'learned' : 'default'} (${r.axisMoves} moves). `
-      + `Racket axis ${r.racket.map((v) => v.toFixed(2)).join(', ')} from ${r.racketSwings} swings. Spin offset ${r.spinOffset.toFixed(2)}.${cap}`;
+      + `Racket axis ${r.racket.map((v) => v.toFixed(2)).join(', ')} from ${r.racketSwings} swings. Spin offset ${r.spinOffset.toFixed(2)}. Spin: ${r.spinCalibrated ? 'calibrated' : 'automatic'}.${cap}`;
   }
 }, status);
 function draw() {
