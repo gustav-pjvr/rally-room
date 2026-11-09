@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F3E9D2">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:,">
+<title>Your racket | Rally Room</title>
+</head>
+<body>
+<main id="app">
+
+  <section id="screen-join" class="screen join" aria-labelledby="join-title">
+    <header class="poster">
+      <p class="kicker">Rally Room</p>
+      <h1 id="join-title">Your phone<br>is the racket.</h1>
+      <div class="sun" aria-hidden="true"></div>
+    </header>
+    <form id="join-form" class="form">
+      <div class="field room-field">
+        <label for="room">Room code</label>
+        <input id="room" name="room" required maxlength="4" minlength="4" pattern="[A-Za-z]{4}" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="room-hint">
+        <p id="room-hint" class="hint">Four letters, shown on the game screen.</p>
+      </div>
+      <div class="field">
+        <label for="name">Your name</label>
+        <input id="name" name="name" required maxlength="30" autocomplete="nickname" enterkeyhint="go">
+      </div>
+      <fieldset class="segmented">
+        <legend>Playing hand</legend>
+        <input type="radio" name="hand" id="hand-right" value="Right" checked><label for="hand-right">Right</label>
+        <input type="radio" name="hand" id="hand-left" value="Left"><label for="hand-left">Left</label>
+      </fieldset>
+      <fieldset class="swatches">
+        <legend>Racket colour</legend>
+        <input type="radio" name="colour" id="c-teal" value="#0F4C5C" checked><label for="c-teal" style="--swatch:#0F4C5C">Teal</label>
+        <input type="radio" name="colour" id="c-clay" value="#B4471A"><label for="c-clay" style="--swatch:#B4471A">Clay</label>
+        <input type="radio" name="colour" id="c-plum" value="#5A4488"><label for="c-plum" style="--swatch:#5A4488">Plum</label>
+        <input type="radio" name="colour" id="c-ink" value="#1B1B1E"><label for="c-ink" style="--swatch:#1B1B1E">Ink</label>
+      </fieldset>
+      <p id="join-error" class="error" role="alert" hidden></p>
+      <button id="join-button" class="primary" type="submit">Join the game</button>
+    </form>
+  </section>
+
+  <section id="screen-allow" class="screen allow" aria-labelledby="allow-title" hidden>
+    <p class="kicker" id="allow-kicker">Joined</p>
+    <h1 id="allow-title">Grip it like a racket.</h1>
+    <figure class="grip">
+      <svg viewBox="0 0 200 270" role="img" aria-labelledby="grip-desc">
+        <title id="grip-desc">A hand holds the phone upright by its bottom half. The top of the phone points up where the racket head would be, and the screen faces sideways.</title>
+        <g stroke="#1B1B1E" stroke-width="1.6" opacity=".3">
+          <path d="M70 18v104M85 9v122M100 6v128M115 9v122M130 18v104M46 44h108M43 66h114M44 88h112M52 110h96"/>
+        </g>
+        <ellipse cx="100" cy="70" rx="58" ry="66" fill="none" stroke="#1B1B1E" stroke-width="3.5" stroke-dasharray="8 7"/>
+        <rect x="79" y="112" width="42" height="136" rx="9" fill="#0F4C5C" stroke="#1B1B1E" stroke-width="4"/>
+        <rect x="85" y="120" width="30" height="110" rx="3" fill="#F3E9D2"/>
+        <path d="M100 150v-44" stroke="#B4471A" stroke-width="6" stroke-linecap="round"/>
+        <path d="M88 118l12-14 12 14" fill="none" stroke="#B4471A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <g fill="#D9622B" stroke="#1B1B1E" stroke-width="4" stroke-linejoin="round">
+          <rect x="62" y="236" width="76" height="34" rx="6"/>
+          <rect x="68" y="170" width="68" height="20" rx="10"/>
+          <rect x="66" y="188" width="70" height="20" rx="10"/>
+          <rect x="66" y="206" width="70" height="20" rx="10"/>
+          <rect x="68" y="224" width="66" height="20" rx="10"/>
+          <path d="M70 176c-14 4-20 26-10 50l10 16" fill="#D9622B"/>
+        </g>
+      </svg>
+      <figcaption>
+        <ol class="steps">
+          <li><strong>Hold the bottom half</strong> like a racket handle.</li>
+          <li><strong>Top of the phone</strong> is the racket head.</li>
+          <li><strong>Screen faces sideways</strong>, like the strings.</li>
+        </ol>
+      </figcaption>
+    </figure>
+    <p id="allow-message" class="status" role="status"></p>
+    <button id="allow" class="primary" type="button">Allow motion</button>
+  </section>
+
+  <section id="screen-lobby" class="screen lobby" aria-labelledby="lobby-title" hidden>
+    <header class="lobby-head">
+      <p class="kicker" id="lobby-kicker">You are in</p>
+      <p class="team" id="lobby-team"><span class="dot" aria-hidden="true"></span><span id="lobby-team-name">Your racket</span></p>
+    </header>
+    <h1 id="lobby-title">Swing to test.</h1>
+    <div class="lobby-face"><canvas id="lobby-racket" aria-hidden="true"></canvas></div>
+    <div class="readout">
+      <div class="meter-row">
+        <label for="power">Power</label>
+        <meter id="power" min="0" max="1" low="0.34" high="0.8" optimum="1" value="0"></meter>
+        <output id="power-value" for="power">0%</output>
+      </div>
+      <p class="spin">Spin <strong id="spin-word">swing to see</strong></p>
+    </div>
+    <p id="lobby-status" class="status" role="status">Waiting for the host to start</p>
+    <p id="lobby-wake" class="note"></p>
+  </section>
+
+  <section id="screen-play" class="screen play" aria-label="Racket" hidden>
+    <div class="hud">
+      <p id="score" class="score"></p>
+      <p id="prompt" class="prompt" aria-live="polite">Get ready</p>
+    </div>
+    <div class="face" id="face"><canvas id="play-racket" aria-hidden="true"></canvas></div>
+  </section>
+
+  <section id="screen-gone" class="screen gone" aria-labelledby="gone-title" hidden>
+    <p class="kicker">Rally Room</p>
+    <div class="sun sun-set" aria-hidden="true"></div>
+    <h1 id="gone-title">The game has closed.</h1>
+    <p id="gone-text" class="lede"></p>
+    <button id="gone-retry" class="primary" type="button" hidden>Try again</button>
+    <button id="gone-join" class="secondary" type="button">Join another room</button>
+  </section>
+
+</main>
+
+<div id="reconnect" class="reconnect" hidden>
+  <div class="reconnect-card" role="status" aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span>
+    <p class="reconnect-title">Reconnecting</p>
+    <p id="reconnect-text">Your place is held for 60 seconds.</p>
+  </div>
+</div>
+
+<script type="module" src="/src/phone/main.ts"></script>
+</body>
+</html>
