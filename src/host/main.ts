@@ -78,6 +78,8 @@ const KEYBOARD_OFFER_MS = 60_000;
 const changes = new ChangeFilter();
 /** Player receiving the ball in the last frame's view: a 'missed' point is theirs. */
 let receiverBefore: number | null = null;
+/** Players who whiffed the ball in play: their miss is sent when the point is decided (phones.ts eventMessages). */
+const whiffed = new Set<number>();
 
 const sendPhone = (m: PhoneMessage) => net.send(m as unknown as Message);
 const sendChanged = (m: PhoneMessage) => { if (changes.pass(m)) sendPhone(m); };
@@ -302,6 +304,7 @@ const ui = createUi(overlay, {
     waitSince = null;
     timeline.reset();
     receiverBefore = null;
+    whiffed.clear();
     smoothing.until = 0;
     for (const slot of a.slots) if (slot !== null) changes.forget(slot);
     sendModes(a.slots, 'play');
@@ -396,7 +399,7 @@ function absorbGap(now: number): void {
 /** hit, miss and game messages for the playing phones. */
 function feedPhones(view: MatchView, events: MatchEvent[]): void {
   if (!playing) return;
-  for (const m of eventMessages(events, playing, receiverBefore)) sendPhone(m);
+  for (const m of eventMessages(events, playing, receiverBefore, whiffed)) sendPhone(m);
   for (const m of gameMessages(view, playing, paused)) sendChanged(m);
   receiverBefore = view.players.find((p) => p.receiving)?.id ?? null;
 }

@@ -16,6 +16,8 @@ export interface LevelTuning {
   reach: number;
   /** Standard deviation of the CPU's contact timing, ms. */
   timingSd: number;
+  /** Extra placement error on the racket face (sd, face units; contact.ts), so CPUs mishit too. */
+  faceSd: number;
   /** Rally flight time range, s (1.6 soft to 0.75 full power for humans). */
   flight: [number, number];
   /** Target depth past the net, m. */
@@ -43,21 +45,21 @@ export interface LevelTuning {
 
 export const LEVELS: Record<Level, LevelTuning> = {
   rookie: {
-    speed: 3.8, reaction: 0.4, reach: 1.5, timingSd: 45,
+    speed: 3.8, reaction: 0.4, reach: 1.5, timingSd: 45, faceSd: 0.3,
     flight: [1.3, 1.6], depth: [6, 9], aim: [0, 0.45], spin: [0, 0.3],
-    aimSd: 0.6, depthSd: 0.9, mishit: 0.14, openCourt: 0.2,
+    aimSd: 0.6, depthSd: 0.9, mishit: 0.12, openCourt: 0.2,
     attack: 0, attackFlight: [1.1, 1.2], attackAim: [0.5, 0.6],
     servePower: [0.45, 0.3], serveSpin: [0.2, 0.5], serveSd: [0.5, 0.3],
   },
   club: {
-    speed: 4.8, reaction: 0.28, reach: 1.6, timingSd: 25,
+    speed: 4.8, reaction: 0.28, reach: 1.6, timingSd: 25, faceSd: 0.2,
     flight: [1.0, 1.3], depth: [7, 10], aim: [0.35, 0.7], spin: [0.2, 0.6],
-    aimSd: 0.45, depthSd: 0.7, mishit: 0.08, openCourt: 0.6,
+    aimSd: 0.45, depthSd: 0.7, mishit: 0.07, openCourt: 0.6,
     attack: 0.15, attackFlight: [0.7, 0.85], attackAim: [0.8, 0.95],
     servePower: [0.65, 0.45], serveSpin: [0.2, 0.6], serveSd: [0.45, 0.28],
   },
   pro: {
-    speed: 5.8, reaction: 0.18, reach: 1.7, timingSd: 12,
+    speed: 5.8, reaction: 0.18, reach: 1.7, timingSd: 12, faceSd: 0.07,
     flight: [0.8, 1.05], depth: [8.5, 10.4], aim: [0.55, 0.82], spin: [0.4, 0.9],
     aimSd: 0.35, depthSd: 0.55, mishit: 0.05, openCourt: 0.85,
     attack: 0.3, attackFlight: [0.6, 0.75], attackAim: [0.82, 0.95],
@@ -116,47 +118,70 @@ export function stanceFor(side: Side, playerX: number, ballX: number): 'forehand
  * height (0.6 to 1.3 m) as close as possible to the preferred depth, among the
  * contacts the player can run to in time. `now` is seconds since the path started.
  * Contact is never planned sooner than `minAfterBounce` seconds after the first
- * bounce: a human's hit window opens W before T*, so humans pass W / 1000 to keep
- * the window from opening before the ball has bounced.
+ * bounce: a human's hit window opens ACCEPT * W before T*, so humans pass
+ * ACCEPT * W / 1000 to keep the window from opening before the ball has bounced.
+ * For the same reason the window must close before the ball dies: a human also
+ * passes ACCEPT * W / 1000 as `minBeforeSecond`, and T* is kept at least that
+ * long before the second bounce, when that still gives a reachable contact at a
+ * comfortable height. If it does not, the full range up to 0.03 s before the
+ * second bounce is used instead (the swing guards then end the window at the
+ * second bounce), so the restriction never makes a ball awkward or unreachable.
  */
 export function planContact(
-  path: BallPath, now: number, mover: Mover, minAfterBounce = 0.02,
+  path: BallPath, now: number, mover: Mover, minAfterBounce = 0.02, minBeforeSecond = 0,
 ): ContactPlan | null {
   if (path.events.some((e) => e.kind === 'net')) return null;
   const first = path.events.find((e) => e.kind === 'bounce' && e.index === 1);
   if (!first) return null;
   const second = path.events.find((e) => e.kind === 'bounce' && e.index === 2);
   const s = sideSign(mover.side);
-  const end = (second ? second.t : first.t + 3) - 0.03;
   type Candidate = { t: number; pos: Vec3 };
-  const comfortable: Candidate[] = [];
-  const any: Candidate[] = [];
-  for (let t = first.t + minAfterBounce; t <= end; t += 0.01) {
-    const pos = pathPosition(path, t);
-    if (pos.z * s <= 0.3) continue;
-    if (pos.y >= CONTACT_LOW && pos.y <= CONTACT_HIGH) comfortable.push({ t, pos });
-    else if (pos.y >= 0.2) any.push({ t, pos });
-  }
-  let candidates = comfortable;
-  if (!candidates.length) {
-    if (!any.length) return null;
-    const top = any.reduce((a, b) => (b.pos.y > a.pos.y ? b : a));
-    candidates = [top];
-  }
-  const plans = candidates.map((c) => {
-    const towards = c.pos.x - mover.pos.x >= 0 ? -1 : 1;
-    const standX = Math.max(mover.minX, Math.min(mover.maxX, c.pos.x + towards * STAND_OFFSET));
-    const stand = vec(standX, 0, c.pos.z);
-    const avail = Math.max(0, c.t - now - mover.reaction);
-    const shortfall = Math.max(0, Math.hypot(stand.x - mover.pos.x, stand.z - mover.pos.z) - mover.speed * avail);
-    const reachable = shortfall + Math.abs(standX - c.pos.x) <= mover.reach;
-    const depthCost = Math.abs(Math.abs(c.pos.z) - PREFERRED_DEPTH);
-    return { t: c.t, pos: c.pos, stand, reachable, shortfall, depthCost };
-  });
-  const ok = plans.filter((p) => p.reachable);
-  const best = ok.length
-    ? ok.reduce((a, b) => (b.depthCost < a.depthCost ? b : a))
-    : plans.reduce((a, b) => (b.shortfall < a.shortfall ? b : a));
+  type Plan = Candidate & { stand: Vec3; reachable: boolean; shortfall: number; depthCost: number };
+
+  /** The best contact among those from the first bounce up to `end`; null if there is none. */
+  const choose = (end: number): { plan: Plan; comfortable: boolean } | null => {
+    const comfortable: Candidate[] = [];
+    const any: Candidate[] = [];
+    for (let t = first.t + minAfterBounce; t <= end; t += 0.01) {
+      const pos = pathPosition(path, t);
+      if (pos.z * s <= 0.3) continue;
+      if (pos.y >= CONTACT_LOW && pos.y <= CONTACT_HIGH) comfortable.push({ t, pos });
+      else if (pos.y >= 0.2) any.push({ t, pos });
+    }
+    let candidates = comfortable;
+    if (!candidates.length) {
+      if (!any.length) return null;
+      candidates = [any.reduce((a, b) => (b.pos.y > a.pos.y ? b : a))];
+    }
+    const plans: Plan[] = candidates.map((c) => {
+      const towards = c.pos.x - mover.pos.x >= 0 ? -1 : 1;
+      const standX = Math.max(mover.minX, Math.min(mover.maxX, c.pos.x + towards * STAND_OFFSET));
+      const stand = vec(standX, 0, c.pos.z);
+      const avail = Math.max(0, c.t - now - mover.reaction);
+      const shortfall = Math.max(0, Math.hypot(stand.x - mover.pos.x, stand.z - mover.pos.z) - mover.speed * avail);
+      const reachable = shortfall + Math.abs(standX - c.pos.x) <= mover.reach;
+      const depthCost = Math.abs(Math.abs(c.pos.z) - PREFERRED_DEPTH);
+      return { t: c.t, pos: c.pos, stand, reachable, shortfall, depthCost };
+    });
+    const ok = plans.filter((p) => p.reachable);
+    const plan = ok.length
+      ? ok.reduce((a, b) => (b.depthCost < a.depthCost ? b : a))
+      : plans.reduce((a, b) => (b.shortfall < a.shortfall ? b : a));
+    return { plan, comfortable: comfortable.length > 0 };
+  };
+  const good = (c: ReturnType<typeof choose>) => !!c && c.plan.reachable && c.comfortable;
+
+  const lastResort = (second ? second.t : first.t + 3) - 0.03;
+  // In order: (1) a reachable, comfortable contact that leaves the whole hit
+  // window before the second bounce; (2) a reachable, comfortable contact
+  // anywhere, its window then cut short at the second bounce by the swing
+  // guards; (3) whatever (1) found; (4) the full range as before. Restricting
+  // first and accepting any result made some balls awkward or unreachable.
+  const roomy = second && minBeforeSecond > 0.03 ? choose(second.t - minBeforeSecond) : null;
+  const full = good(roomy) ? null : choose(lastResort);
+  const picked = good(roomy) ? roomy : good(full) ? full : roomy ?? full;
+  if (!picked) return null;
+  const best = picked.plan;
   return {
     t: best.t, pos: best.pos, stand: best.stand, reachable: best.reachable,
     stance: stanceFor(mover.side, best.stand.x, best.pos.x),

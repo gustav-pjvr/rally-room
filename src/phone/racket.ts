@@ -1,6 +1,7 @@
 // The racket face (the signature move, DESIGN.md section 1): a racket head drawn to fill the
 // phone, strings in the team colour, and a ripple that starts where the ball met the strings.
-import { clamp01, clampUnit, mix, nearFrame, parseHex, readableOn, rippleStyle, toHex } from './logic';
+// A frame hit does not ripple the strings: the rim flashes and shakes where the ball struck it.
+import { clamp01, facePoint, mix, nearFrame, parseHex, readableOn, rippleStyle, toHex } from './logic';
 
 const INK = '#1B1B1E';
 const CREAM = '#F3E9D2';
@@ -9,8 +10,13 @@ const BED = '#1B1B1E';
 const MAINS = 16;
 const CROSSES = 19;
 const FLASH_MS = 420;
+/** Frame hit: how long the rim shakes and the spark shows, and how far the rim moves at first (px). */
+const RIM_MS = 380;
+const RIM_SHAKE_PX = 7;
 
 interface Ripple { x: number; y: number; t0: number; q: number; mishit: boolean }
+/** A frame hit: where on the rim (unit direction from the centre, screen y down) and when. */
+interface RimHit { nx: number; ny: number; t0: number }
 type Ctx = CanvasRenderingContext2D;
 
 export interface FaceOptions {
@@ -31,6 +37,8 @@ export class RacketFace {
   private label = '';
   private ripples: Ripple[] = [];
   private frameFlash: { t0: number; colour: string } | undefined;
+  private rimHit: RimHit | undefined;
+  private leftHanded = false;
   private raf = 0;
   private readonly reduced = matchMedia('(prefers-reduced-motion: reduce)');
   private g = { cx: 0, cy: 0, rx: 0, ry: 0, fw: 0, bx: 0, by: 0 };
@@ -55,17 +63,33 @@ export class RacketFace {
     this.draw();
   }
 
-  /** `u` across the strings (-1 left .. +1 right), `v` up the strings (-1 bottom .. +1 top). */
-  hit(u: number, v: number, quality: number) {
+  /** Mirrors the face across for a left-handed grip (logic.ts facePoint). */
+  setLeftHanded(left: boolean) {
+    this.leftHanded = left;
+  }
+
+  /**
+   * Where the ball met the face (DESIGN.md section 3): `a` along the racket
+   * (-1 throat .. +1 tip, drawn tip up), `b` across it (-1 bottom .. +1 top
+   * edge). `frame`: it struck the frame, so the rim flashes and shakes there.
+   */
+  hit(a: number, b: number, quality: number, frame = false) {
     const { cx, cy, bx, by } = this.g;
-    const uu = clampUnit(u), vv = clampUnit(v);
+    const p = facePoint(a, b, this.leftHanded);
     const q = clamp01(quality);
-    const mishit = nearFrame(uu, vv) || q < 0.3;
-    // Scale so |(u, v)| = 1 lands just inside the frame.
-    this.ripples.push({ x: cx + uu * bx * 0.92, y: cy - vv * by * 0.92, t0: performance.now(), q, mishit });
+    const now = performance.now();
+    if (frame || p.rim) {
+      this.rimHit = { nx: p.x, ny: -p.y, t0: now };
+      this.frameFlash = { t0: now, colour: CREAM };
+      this.start();
+      return;
+    }
+    const mishit = nearFrame(p.x, p.y) || q < 0.3;
+    // Scale so the edge of the bed lands just inside the frame.
+    this.ripples.push({ x: cx + p.x * bx * 0.92, y: cy - p.y * by * 0.92, t0: now, q, mishit });
     if (this.ripples.length > 4) this.ripples.shift();
     // A mishit rings the frame: it flashes pale.
-    if (mishit) this.frameFlash = { t0: performance.now(), colour: CREAM };
+    if (mishit) this.frameFlash = { t0: now, colour: CREAM };
     this.start();
   }
 
@@ -98,7 +122,7 @@ export class RacketFace {
   private tick = () => {
     this.raf = 0;
     this.draw();
-    if (this.ripples.length || this.frameFlash) this.raf = requestAnimationFrame(this.tick);
+    if (this.ripples.length || this.frameFlash || this.rimHit) this.raf = requestAnimationFrame(this.tick);
   };
 
   private draw() {
@@ -108,6 +132,7 @@ export class RacketFace {
     const reduced = this.reduced.matches;
     this.ripples = this.ripples.filter((r) => now - r.t0 < (reduced ? 600 : rippleStyle(r.q).duration));
     if (this.frameFlash && now - this.frameFlash.t0 > FLASH_MS) this.frameFlash = undefined;
+    if (this.rimHit && now - this.rimHit.t0 > RIM_MS) this.rimHit = undefined;
     const live = reduced ? [] : this.ripples;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -136,6 +161,14 @@ export class RacketFace {
       const k = Math.max(0, 1 - (now - this.frameFlash.t0) / FLASH_MS);
       colour = mixHex(this.frame, this.frameFlash.colour, k * 0.85);
     }
+    // A frame hit shakes the rim along the line of the blow, dying away. Reduced motion: no shake, only the flash.
+    const rim = this.rimHit;
+    ctx.save();
+    if (rim && !reduced) {
+      const p = (now - rim.t0) / RIM_MS;
+      const offset = RIM_SHAKE_PX * (1 - p) * (1 - p) * Math.sin(p * Math.PI * 9);
+      ctx.translate(rim.nx * offset, rim.ny * offset);
+    }
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.lineWidth = fw + 6;
@@ -154,6 +187,54 @@ export class RacketFace {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+    if (rim) this.drawRimSpark(rim, now, reduced);
+    ctx.restore();
+  }
+
+  /** Where the ball struck the frame: a ball mark on the rim and, unless motion is reduced, short sparks flying outward. */
+  private drawRimSpark(rim: RimHit, now: number, reduced: boolean) {
+    const { ctx } = this;
+    const { cx, cy, rx, ry, fw } = this.g;
+    const p = Math.min(1, (now - rim.t0) / RIM_MS);
+    const x = cx + rim.nx * rx;
+    const y = cy + rim.ny * ry;
+    const fade = 1 - p;
+    // Ball mark on the rim.
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = BALL;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(6, fw * 0.75), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Reduced motion shows the flash and the mark only: no sparks (DESIGN.md section 3).
+    if (!reduced) this.drawSparks(x, y, Math.atan2(rim.ny * ry, rim.nx * rx), p);
+    ctx.globalAlpha = 1;
+  }
+
+  /** Short cream strokes fanning outward from the rim point (x, y) in direction `out`; `p` is 0..1 through the effect. */
+  private drawSparks(x: number, y: number, out: number, p: number) {
+    const { ctx } = this;
+    const { fw } = this.g;
+    const travel = 0.3 + p * 0.9;
+    // Ink under cream, so the sparks read on the dark strings and on the pale page alike.
+    ctx.lineCap = 'round';
+    const width = Math.max(2, fw * 0.28);
+    for (const [colour, w] of [[INK, width + 3], [CREAM, width]] as const) {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = w;
+      for (let i = -2; i <= 2; i++) {
+        const ang = out + i * 0.42;
+        const r0 = fw * (0.9 + travel);
+        const r1 = r0 + fw * (0.9 + 0.6 * (1 - Math.abs(i) / 2));
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(ang) * r0, y + Math.sin(ang) * r0);
+        ctx.lineTo(x + Math.cos(ang) * r1, y + Math.sin(ang) * r1);
+        ctx.stroke();
+      }
+    }
+    ctx.lineCap = 'butt';
   }
 
   private drawThroat() {

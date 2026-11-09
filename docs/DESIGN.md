@@ -26,7 +26,8 @@ where you see fit". Everything below is an authored decision unless quoted.
   racket and you can feel the sweet spot."
 - **Signature move (bespoke, from this subject):** the phone screen *is* the
   racket face. It shows strings; on contact a ripple starts where the ball met
-  the strings (centre for a clean hit, near the frame for a mistimed one) and
+  the strings (the sweet spot for a clean hit, toward the tip, the throat or an
+  edge for a mistimed one; a frame hit flashes and shakes the rim instead) and
   Android phones buzz. Your racket tells you how you hit it, in your hand.
 - **Second unique moment:** after a winner, the host screen shows a two-second
   replay with the swing path drawn from the phone's own sensor data.
@@ -143,8 +144,8 @@ above where they differ.
 | host > phone | `{t:"mode", to, mode}` with mode `lab`, `lobby` or `play` | Lab page sends `lab` (raw stream on). Game page sends `lobby` on join and between matches, `play` when a match starts |
 | host > phone | `{t:"you", to, player, color, team}` | On join and when settings change: player number (1 or 2) in the next match, team colour, team name for the score line |
 | host > phone | `{t:"game", to, state, score, message}` | On change only. `state`: `wait` (other side serving or between points), `serve` (your serve: swing to toss), `toss` (swing to hit), `rally` (ball in play), `paused`, `over`. `score`: short text like "30-15, games 1-0". `message`: the big host message or null |
-| host > phone | `{t:"hit", to, quality, u, v}` | Your swing hit. `quality` 0..1 = 1 - |timing|; `u` = timing (-1 early .. +1 late) placed across the strings; `v` = spin (-1 slice .. +1 topspin) placed up the strings |
-| host > phone | `{t:"miss", to}` | You were meant to hit and did not (whiff or missed ball) |
+| host > phone | `{t:"hit", to, quality, u, v, frame}` | Your swing touched the ball, and where (section 5, the contact point). `u` = `a` along the racket (-1 throat .. +1 tip); `v` = `b` across it (-1 bottom edge .. +1 top edge); both up to 1.25 on the frame. `frame`: true for a frame hit. `quality` 0..1 = 1 - d, the distance from the sweet spot (0.05 on the frame) |
+| host > phone | `{t:"miss", to}` | You were meant to hit and did not. Sent once per ball, when the point is decided: a whiff alone sends nothing, because the ball is still live and a later swing may hit it (a whiff then a hit sends only the hit; a whiff then nothing sends one miss at the point) |
 | phone > host | `{t:"player-info", hand, colour}` | After joining; `name` came with `join` |
 
 Host side: the first phone to join is player 1, the second player 2 (doubles
@@ -163,10 +164,17 @@ keyboard stays as a fallback when no phone has joined.
 
 Phone side: after Allow motion, the lobby shows the swing test. On `play` the
 screen becomes the racket face (signature move, section 1): strings in the
-team colour, a ripple from (u, v) on every `hit` (bigger and brighter for
-higher quality; near the frame it reads as a mishit), a short frame shake on
-`miss`, `navigator.vibrate` on Android (strength by quality), and a small line
-with the score and the prompt from `game.state` ("Your serve: swing to toss").
+team colour, and on every `hit` a ripple from where the ball met the strings:
+`a` runs up the screen (tip at the top, throat at the bottom), `b` across it
+(the top edge on the right for a right-handed grip, on the left for a
+left-handed one, because the screen's right edge faces up in a right-handed
+forehand). Bigger and brighter for higher quality; near the frame it reads as
+a mishit. With `frame: true` there is no string ripple: the rim flashes pale
+and shakes along the line of the blow, with a ball mark and sparks where it
+struck (reduced motion: the flash and the mark only, no shake). A short frame
+shake on `miss`, `navigator.vibrate` on Android (strength by quality, a rattle
+for a frame hit), and a small line with the score and the prompt from
+`game.state` ("Your serve: swing to toss").
 
 ## 4. Swing detection (runs on the phone)
 
@@ -214,14 +222,33 @@ swings, which is harmless because acceleration is only trusted at rest.
 
 **Backswings:** a hard backswing can still pass MIN_PEAK and fire about 0.5 s
 before the real swing. The phone reports every swing; the game (section 5)
-takes the strongest swing inside the hit window, so an early backswing never
-counts as a whiff.
+ignores swings outside the acceptance window and takes the strongest swing
+that touches the ball inside it, so an early backswing never costs the point.
 
 **Verified with labels** (Samsung A32, Chrome, 2026-11-09, 73 swings in eight
 labelled sets, kept as `tests/fixtures/phone-a32-labelled-2026-11-09.csv`):
 `dir` separates forehand (+1) from backhand (-1); `spin` puts topspin, flat and
-slice in the right order, and with the learned racket axis and personal offset
-of section 4a it calls 80 to 86% of swings correctly.
+slice in the right order.
+
+**Spin rule, revised after play-testing** (two more labelled sessions swung the
+way Gustav plays, `phone-a32-forehand-2026-11-09.csv` and `phone-a32-backhand-2026-11-09.csv`; replayed
+in order through one detector in `tests/spin.test.ts`):
+- In play, slices read as flat and nearly everything else as topspin. The
+  cause was the running per-player offset (median of the last 25 spins): after
+  ten flat forehands it centred the topspin forehands away to flat. It labelled
+  only 64% of the match-style swings correctly. It is removed.
+- Now: spin = (upward racket-head path at the peak, using the learned racket
+  axis, minus a fixed neutral point of +0.05) scaled so measured flat swings
+  (-0.12 to +0.22) fall in the +-0.2 "flat" band. 73% correct over 120
+  labelled swings, with slice < flat < topspin on average for both sides in
+  every session, and no dependence on swing order.
+- Ceiling without labels: a player's "flat" moves between sessions (forehand
+  flat averaged +0.25 in one session and -0.44 in another), so no fixed rule
+  can do much better. Measured options: averaging the path over the swing
+  instead of the peak did not generalise across sessions; a separate backhand
+  neutral point did not help overall. Adding the racket-face angle at contact
+  plus a player's own labelled examples reached about 90% (left one out, per
+  session): that needs a short spin calibration with labels (offered, not built).
 
 ## 4a. Automatic phone setup (no setup screen)
 
@@ -235,7 +262,7 @@ recording as if made on differently behaved phones (`tests/profile.test.ts`).
 | Rotation axis order and signs | `AxisCalibrator`: after each still, move, still, it integrates the gyro under all 48 orders and signs and keeps the one that carries gravity from the first pose to the second. Until it is sure (6 moves, best mean error under 40 degrees, 12 better than the runner-up) the platform default is used | Scrambled and flipped axes: exact inverse found after about 60 s of play |
 | deg/s or rad/s | `UnitsGuess`: a pull over 25 m/s² only happens in a real swing (several hundred deg/s); if the reading is then under 40, it is rad/s | Found after about 7 s |
 | Accelerometer sign, how the phone sits in the hand | `RacketAxisLearner`: the swing pulls the phone away from the wrist, so the accelerometer minus gravity points back to the wrist; the racket is the other way. Averaged over swings, it absorbs grip and a flipped accelerometer | Flipped accelerometer: identical spin results |
-| The player's own swing style | `SpinBaseline`: subtracts the median of their last 25 spins, limited to +-0.25 | 74% to 86% correct spin |
+| The player's own swing style | Not corrected automatically. A running median offset was tried and removed (section 4: it erased a player's habitual spin). A fixed neutral point (+0.05) is used instead | 73% correct spin over 120 labelled swings |
 | Gyro that tops out early | `SaturationWatch`: three swings at the same top; thresholds then scale to that top | 500 deg/s gyro: swings found, spin degraded to 57% |
 | No gyroscope | Accelerometer-only mode after 60 samples with no rotation rate: turn rate estimated from the pull (a = w² r, r = 0.35 m), spin reads flat | Swings found, about 10% extra |
 | Sample rate | Everything uses timestamps | |
@@ -277,43 +304,159 @@ depends on level). In doubles each player covers their half of the court. The
 game picks forehand or backhand from which side of the body the ball passes.
 Humans only swing.
 
-**Hitting (timing is aim):**
+**Hitting (timing is aim, and where the ball meets the strings):**
 - `T*` = the moment the ball passes the player's contact point.
 - `Ts` = swing host time (`tp - offset`). `dt = Ts - T*`.
-- Hit window `W`: 180 ms (easy), 130 ms (normal), 90 ms (pro). Of the swings
-  whose `Ts` falls inside it, the strongest counts. Swings outside it are
-  ignored (a backswing is not a whiff); no swing in the window is a miss.
-  The window always opens after the first bounce: a human can never strike a
-  ball before it lands, so a ball going out stays out.
+- Timing unit `W`: 180 ms (easy), 130 ms (normal), 90 ms (pro); `u = dt / W`.
+  Near `|u| = 1` the ball meets the edge of the string bed, where the old
+  all-or-nothing window ended.
+- **Acceptance window:** swings with `|u| <= 1.6` (Normal: 208 ms either side)
+  meet the ball somewhere: on the strings, on the frame, or not at all (a clean
+  miss, a `whiff`). Swings outside it are ignored (a backswing is not a whiff).
+  Of the swings that touch the ball, the strongest counts. A whiff does not end
+  the chance: a later swing in the window may still touch the ball, and a
+  stronger swing that would whiff never undoes a hit. No touching swing in the
+  window is a miss. The window always opens after the first bounce: a human
+  can never strike a ball before it lands, so a ball going out stays out. It
+  also closes at the second bounce: a ball that has bounced twice is dead and
+  no swing can touch it (a swing dated at or after the second bounce is
+  ignored, and the miss is declared at the latest 300 ms after it). Planning
+  keeps T* at least ACCEPT * W before the second bounce when that still gives
+  a reachable contact at a comfortable height, so the window normally closes
+  by itself first. If it does not, the full range is used and the window is
+  cut short at the second bounce: the rule never makes a ball awkward or
+  unreachable (tested across all three windows and many positions).
+- **Phone feedback for a whiff:** the host sends `miss` at most once per ball
+  and only once the outcome is known (`phones.ts` `eventMessages`). A whiff is
+  remembered, not sent. The point then decides: `missed` and `ace` send the
+  receiver's miss, `winner` (a ball too far to reach, swung at anyway) sends
+  one to the whiffer, and a later hit forgets the whiff.
 - **One exception to "strongest counts":** once a bounce, net or fault has been
   shown, a later-arriving swing never undoes it. A stronger serve swing that
   reaches the host after the weaker serve has already bounced is ignored.
   Announced outcomes are final; it takes over 250 ms of lag to happen.
-- `u = dt / W` in -1..1. Early pulls the ball cross-court, late pushes it down
-  the line: target `x = hitSide * u * 0.75 * halfWidth`.
-- Depth and pace from `power`: flight time from 1.6 s (soft) to 0.75 s (full).
-  Target depth from 5 m to 10.5 m past the net.
+- Aim from timing: early pulls the ball cross-court, late pushes it down the
+  line: aim `x = hitSide * clamp(u, -1, 1) * 0.75 * halfWidth`.
+- Depth and pace from `power * transfer` (transfer: below): flight time from
+  1.6 s (soft) to 0.75 s (full). Target depth from 5 m to 10.5 m past the net.
 - `spin` from the swing sets topspin or slice in the physics.
-- Risk: `|u| > 0.8` adds random width error; `power > 0.9` with `|spin| < 0.2`
-  adds random length error. A perfect-timing flat full swing is the riskiest shot.
-- **Quality** (for the ripple and the sound) = `1 - |u|`.
+
+**The contact point** (`src/host/game/contact.ts`, all numbers below are the
+tuned values). Face coordinates: `a` along the racket, -1 at the throat (the
+handle end of the string bed) to +1 at the tip; `b` across it, -1 bottom edge
+to +1 top edge (the edge facing up at contact). The string bed is
+`a^2 + b^2 <= 1`, the frame `1 < r <= 1.25`; beyond 1.25 the racket misses.
+The sweet spot is `(a, b) = (-0.15, 0)`.
+
+Where the ball lands on the face:
+- `a = -0.15 - u * 1.0` early (`u < 0`, reaching: toward the tip) and
+  `a = -0.15 - u * 0.75` late (cramped: toward the throat), plus placement
+  noise. The early slope is steeper because the sweet spot sits toward the
+  throat: with one slope of 0.75 the early bed edge fell at `u = -1.53`, far
+  outside the old window, and a casual player's very early swings were safer
+  than centred ones. Now the bed edges fall at `u = -1.15` (tip) and
+  `u = +1.13` (throat); the frame runs to about `u = -1.4` and `u = +1.47`
+  (with no spin); beyond is a whiff, up to the 1.6 acceptance edge.
+- `b = -0.7 * u * spin` plus a height push plus noise. A topspin (low to high)
+  swing met early has not risen yet, so the ball sits high on the face
+  (`b > 0`); late, low (`b < 0`); slice the other way. Height push: below
+  0.5 m, `-(0.5 - y) * 0.9`; above 1.4 m, `+(y - 1.4) * 0.5`.
+- Placement noise (sd along the racket, face units):
+  `0.05 + 0.12 * rushed + 0.14 * awkward`; across the face 0.6 of that.
+  `rushed = clamp(1 - slack / 0.4 s)`, where slack is the time to spare after
+  running to the contact point at run speed (an unreachable ball is 1).
+  `awkward` is 1 for a ball jammed into the body (under 0.3 m sideways, full
+  at 0) or at full stretch (over 0.95 m, full at 1.8 m), 0 in between.
+  All seeded, so a match replays exactly.
+
+What the contact does. `d` is the distance from the sweet spot as a fraction
+of the way to the rim along the same line (0 at the sweet spot, 1 on the rim
+in every direction):
+- **Quality** (ripple, sound, haptics) `= clamp(1 - d)`; a frame hit 0.05.
+- Power transfer `1 - 0.45 d^2`; random sideways error sd `1.2 d` m and length
+  error sd `0.6 d` m.
+- **Tip** (`a > 0.5`): twists the ball wide, up to 1.5 m further toward the
+  sideline the shot was heading for at `a = 1` (a shot aimed down the middle
+  goes toward the outside of the side of the body the ball was on). The
+  literal "toward the outside of the hitting side" was tried first: it pulled
+  early cross-court balls back into the court half the time, so tip hits went
+  in 94% of the time, safer than centred ones.
+- **Throat** (`a < -0.6`): dead and short: at `a = -1`, 45% less power, 3.5 m
+  shorter and launched up to 3 degrees lower (net risk).
+- **Top edge** (`b > 0.4`): launched up to 6 degrees lower at `b = 1` (net
+  risk). **Bottom edge** (`b < -0.4`): up to 6 degrees higher (long or a
+  pop-up).
+- The old length risk stays: a flat swing (`|spin| < 0.2`) over 0.9 power adds
+  length error up to sd 1.8 m at full power, even when centred.
+- **Frame** (`1 < r <= 1.25`): a shank. 40% go into the net slowly (0.9 to
+  1.2 s), the rest are slow loopy balls (1.5 to 2.1 s) to a random spot up to
+  3.5 m outside the sidelines and 2.5 to 15 m past the net. A shank that lands
+  in is a valid ball (about 1 in 4 do).
+- **Beyond 1.25:** a clean miss: `whiff`, the ball stays in play and the point
+  is lost at the miss time unless a later swing touches it.
+
+The hit event carries `contact: { a, b, frame }`; the phone draws it (section
+3). The old separate risk rule (`|u| > 0.8` width error) is gone: risk now
+comes from where on the face the ball was struck.
+
+**Playability** (seeded simulation, 30 one-set matches per row, scripted human
+swinging at `T* + jitter` with power 0.4 to 0.9 and spin -0.1 to 0.6; the old
+model's results in brackets). "Uniform ±X" is the spread `chain.mjs` uses;
+"Gaussian sd X" is a harsher reading of the same words.
+
+| Human | Window | CPU | Sets won | Shots per point |
+|---|---|---|---|---|
+| Casual, uniform ±100 ms | Normal | Rookie | 30/30 (30/30) | 14.4 (14.4) |
+| Casual, Gaussian sd 75 ms | Normal | Rookie | 30/30 | 9.6 |
+| Casual, Gaussian sd 100 ms | Normal | Rookie | 2/30 (3/30) | 6.9 (5.9) |
+| Casual, Gaussian sd 100 ms | Easy | Rookie | 30/30 (30/30) | 7.2 (9.3) |
+| Casual, uniform ±100 ms | Normal | Club | 30/30 (30/30) | 21.5 (21.7) |
+| Good, uniform ±50 ms | Normal | Pro | 23/30 (29/30) | 11.6 (15.0) |
+| Good, Gaussian sd 50 ms | Normal | Pro | 12/30 (28/30) | 10.7 (13.7) |
+| Good, uniform ±50 ms | Pro | Pro | 30/30 (30/30) | 14.9 (14.5) |
+
+With uniform ±100 ms every swing lands in the bed (centre 47%, mid 36%, tip 7%,
+throat 10%) and almost every ball goes in (tip hits 97%); the ripple moves
+around the face and off-centre balls are slower. With Gaussian sd 100 ms, 8% of the human's hits are frame hits
+(24% of those land in), tip hits land in 79% of the time and throat hits 91%;
+in the old model those swings were all clean misses. A good player is no
+longer near-certain to beat Pro because off-centre balls arrive slower, so the
+Pro CPU, which errs more under pace, makes fewer errors.
 
 **Lag compensation:** the swing message arrives after the contact moment. The
 host knows the ball's exact path (it is analytic). When a valid swing arrives,
 the new shot starts from the ball's position at `Ts` and is fast-forwarded to
 now. The ball can jump 1 to 6 m on screen (incoming plus outgoing speed times
 the lag), so the renderer draws the difference away over 120 ms. A miss is
-only declared after `T* + W + 300 ms` (300 ms is the lag the contract allows).
+only declared after `T* + 1.6 W + 300 ms` (the acceptance edge plus the 300 ms
+of lag the contract allows).
 The host pauses the match when its tab is hidden and treats any frame gap
 over 250 ms as paused time, so nothing is played while nobody can see it.
 
 **Serving:** the first swing tosses the ball (it rises to about 3 m and falls
-in 1.1 s); the second swing hits it. Contact quality is best near the top of the
-toss. The serve goes to the correct service box, with timing nudging it wide or
-to the T. Two faults lose the point. CPU players serve on their own.
+in 1.1 s); the second swing hits it, between 250 and 1150 ms after the toss.
+The serve uses the same contact model: `a` from the toss timing
+(`u = (Ts - top of toss) / 550 ms`, same slopes), `b = -0.6 * drop`, where
+drop is how far the ball has fallen below the top of the toss (capped at
+1.1 m), plus 0.05 noise. So the top of the toss is the sweet spot, and a late
+serve is struck low on the face toward the throat (short, dead, launched
+high). A tip hit twists the serve toward the sideline of its box. Struck below
+1.9 m it goes into the net whatever the contact. A human serve whiff leaves
+the toss falling: another swing may still hit it, or it is caught and tossed
+again without a fault. The serve goes to the correct service box, with timing
+nudging it wide or to the T. Two faults lose the point. CPU players serve on
+their own and never whiff a serve.
 
 **CPU opponent:** reads the incoming ball, runs to it at its level's speed, and
-picks a target with a level-based error. Levels: Rookie, Club, Pro.
+picks a target with a level-based error. Levels: Rookie, Club, Pro. CPUs strike
+through the same contact model, so they mishit too: their timing is measured
+against the Normal unit (130 ms) whatever window the humans chose, and each
+level adds its own face placement noise (sd 0.3 Rookie, 0.2 Club, 0.07 Pro) on
+top of its timing noise (45, 25, 12 ms) and its chance of a botched shot
+(12%, 7%, 5% before pressure from a fast ball). A CPU frame hit is a shank, a
+CPU whiff loses the point, and lost power makes a CPU shot 5 m shorter and
+0.9 s slower per unit lost. In the simulation a Rookie hits the frame on about
+1.4% of its shots.
 
 **Scoring:** standard tennis: 15, 30, 40, deuce, advantage; games; tiebreak at
 6-6. Match lengths: 1 game, 3 games, 1 set. Server alternates each game and

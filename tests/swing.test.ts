@@ -29,7 +29,7 @@ describe('swing detector', () => {
     expect(s.t).toBe('swing');
     expect(s.omega).toBeGreaterThan(900);
     expect(s.power).toBeCloseTo((s.omega - TUNING.MIN_PEAK) / (TUNING.FULL_POWER - TUNING.MIN_PEAK), 5);
-    expect(Math.abs(s.spin)).toBeLessThan(0.05);
+    expect(Math.abs(s.spin)).toBeLessThan(0.1); // reads as flat (neutral point +0.05)
     expect(s.dir).toBe(1);
   });
 

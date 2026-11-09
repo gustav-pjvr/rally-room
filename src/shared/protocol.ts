@@ -29,7 +29,8 @@ export type PhoneMessage =
 export type HostMessage =
   | { t: 'ping'; h: number; to: number }
   | { t: 'mode'; mode: Mode; to: number }
-  | { t: 'hit'; to: number; quality: number; u: number; v: number }
+  // u = a along the racket (-1 throat .. +1 tip), v = b across it (-1 bottom .. +1 top), up to 1.25 on the frame
+  | { t: 'hit'; to: number; quality: number; u: number; v: number; frame?: boolean }
   // Phase 3 (DESIGN.md section 3, Phase 3 messages)
   | { t: 'you'; to: number; player: 1 | 2 | null; color: string; team: string | null }
   | { t: 'game'; to: number; state: GameState; score: string; message: string | null }

@@ -109,9 +109,21 @@ export interface MatchView {
   stats: { longestRally: number; fastestShotKmh: number };
 }
 
+/**
+ * Where the ball met the racket face (DESIGN.md section 5): `a` along the racket,
+ * -1 throat to +1 tip; `b` across it, -1 bottom edge to +1 top edge. The string
+ * bed is a^2 + b^2 <= 1; `frame` is true for a frame hit (1 < r <= 1.25).
+ */
+export interface ContactPoint { a: number; b: number; frame: boolean }
+
 export type MatchEvent =
   | { type: 'toss'; player: number }
-  | { type: 'hit'; player: number; quality: number; power: number; spin: number; u: number; speedKmh: number }
+  /**
+   * quality: 0..1 from the distance to the sweet spot (0.05 off the frame).
+   * power: the swing's power. u: timing ratio (Ts - T*) / W, negative early
+   * (serves: toss timing, -1..1).
+   */
+  | { type: 'hit'; player: number; quality: number; power: number; spin: number; u: number; speedKmh: number; contact: ContactPoint }
   | { type: 'whiff'; player: number }
   | { type: 'bounce'; pos: Vec3; in: boolean }
   | { type: 'net' }
@@ -123,7 +135,11 @@ export type MatchEvent =
 export interface Match {
   /** Advance to host time `now` (ms) and return what happened since the last call. */
   update(now: number): MatchEvent[];
-  /** A human swung. Swings outside the hit window are ignored, not whiffs (DESIGN.md section 5). */
+  /**
+   * A human swung. Swings outside the acceptance window are ignored, not
+   * whiffs; inside it the timing decides where the ball meets the face, and a
+   * contact beyond the frame is a whiff (DESIGN.md section 5).
+   */
   swing(input: SwingInput): void;
   view(): MatchView;
 }

@@ -4,7 +4,7 @@ import {
   playerOfSlot, safeColor, scoreText, shortName, suggestedHumans, youMessages, type Phone, type PhoneMessage,
 } from '../../src/host/phones';
 import { createMatch } from '../../src/host/game/match';
-import type { MatchView } from '../../src/host/game/types';
+import type { MatchEvent, MatchView } from '../../src/host/game/types';
 
 const phone = (slot: number, seq: number, extra: Partial<Phone> = {}): Phone =>
   ({ slot, name: `P${slot}`, color: null, connected: true, seq, ...extra });
@@ -73,16 +73,27 @@ describe('names and colours', () => {
 describe('messages to phones', () => {
   const a = { humans: 2 as const, slots: [1, 3] };
 
-  it('turns a human hit into a hit for that phone only, v = spin', () => {
+  it('turns a human hit into a hit for that phone only, carrying where the ball met the face', () => {
     const out = eventMessages([
-      { type: 'hit', player: 1, quality: 0.8, power: 0.7, spin: -0.5, u: 0.2, speedKmh: 90 },
-      { type: 'hit', player: 2, quality: 1, power: 1, spin: 0, u: 0, speedKmh: 90 },
+      { type: 'hit', player: 1, quality: 0.8, power: 0.7, spin: -0.5, u: 0.2, speedKmh: 90, contact: { a: 0.62, b: -0.3, frame: false } },
+      { type: 'hit', player: 2, quality: 1, power: 1, spin: 0, u: 0, speedKmh: 90, contact: { a: -0.15, b: 0, frame: false } },
     ], a, null);
-    expect(out).toEqual([{ t: 'hit', to: 3, quality: 0.8, u: 0.2, v: -0.5 }]);
+    // u = a (along the racket), v = b (across it): the real contact, not timing and spin.
+    expect(out).toEqual([{ t: 'hit', to: 3, quality: 0.8, u: 0.62, v: -0.3, frame: false }]);
   });
 
-  it('sends miss on a whiff and on a missed point for the receiver, once each', () => {
-    expect(eventMessages([{ type: 'whiff', player: 0 }], a, null)).toEqual([{ t: 'miss', to: 1 }]);
+  it('marks a frame hit and keeps its point on the frame, clamping wild values', () => {
+    const out = eventMessages([
+      { type: 'hit', player: 0, quality: 0.05, power: 0.7, spin: 0, u: 1.3, speedKmh: 30, contact: { a: -1.1, b: 0.2, frame: true } },
+      { type: 'hit', player: 0, quality: 0.05, power: 0.7, spin: 0, u: 1.3, speedKmh: 30, contact: { a: 9, b: Number.NaN, frame: true } },
+    ], a, null);
+    expect(out).toEqual([
+      { t: 'hit', to: 1, quality: 0.05, u: -1.1, v: 0.2, frame: true },
+      { t: 'hit', to: 1, quality: 0.05, u: 1.25, v: 0, frame: true },
+    ]);
+  });
+
+  it('sends miss for a missed point and for an ace, once, to the receiver', () => {
     expect(eventMessages([{ type: 'point', winner: 'far', reason: 'missed' }], a, 1)).toEqual([{ t: 'miss', to: 3 }]);
     // An unreturned serve is the receiver's miss too; a human's own ace sends nothing.
     expect(eventMessages([{ type: 'point', winner: 'far', reason: 'ace' }], a, 0)).toEqual([{ t: 'miss', to: 1 }]);
@@ -91,10 +102,107 @@ describe('messages to phones', () => {
       .toEqual([{ t: 'miss', to: 3 }]);
   });
 
+  describe('a whiff leaves the ball live, so only the outcome sends a miss', () => {
+    const hit = (player: number): MatchEvent => ({
+      type: 'hit', player, quality: 0.8, power: 0.5, spin: 0, u: 0, speedKmh: 80, contact: { a: 0.1, b: 0, frame: false },
+    });
+
+    it('a whiff alone sends nothing', () => {
+      expect(eventMessages([{ type: 'whiff', player: 0 }], a, null, new Set())).toEqual([]);
+    });
+
+    it('whiff, then a good swing: only the hit reaches the phone, in one frame or across frames', () => {
+      expect(eventMessages([{ type: 'whiff', player: 0 }, hit(0)], a, null, new Set()))
+        .toEqual([{ t: 'hit', to: 1, quality: 0.8, u: 0.1, v: 0, frame: false }]);
+      const state = new Set<number>();
+      const out = [
+        ...eventMessages([{ type: 'whiff', player: 0 }], a, 0, state),
+        ...eventMessages([hit(0)], a, 0, state),
+        // The next ball is lost to a CPU winner the player never swung at: no stale miss.
+        ...eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0, state),
+      ];
+      expect(out.map((m) => m.t)).toEqual(['hit']);
+    });
+
+    it('whiff, then nothing: exactly one miss, when the point is decided', () => {
+      for (const reason of ['missed', 'ace'] as const) {
+        const state = new Set<number>();
+        const out = [
+          ...eventMessages([{ type: 'whiff', player: 0 }], a, 0, state),
+          ...eventMessages([], a, 0, state),
+          ...eventMessages([{ type: 'point', winner: 'far', reason }], a, 0, state),
+        ];
+        expect(out, reason).toEqual([{ t: 'miss', to: 1 }]);
+      }
+    });
+
+    it('whiff at an unreachable ball (point reason winner): still one miss, at the point', () => {
+      const state = new Set<number>();
+      const out = [
+        ...eventMessages([{ type: 'whiff', player: 0 }], a, 0, state),
+        ...eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0, state),
+      ];
+      expect(out).toEqual([{ t: 'miss', to: 1 }]);
+      expect(state.size).toBe(0);
+    });
+
+    it('a whiff does not leak into the next point', () => {
+      const state = new Set<number>();
+      eventMessages([{ type: 'whiff', player: 0 }], a, 0, state);
+      eventMessages([{ type: 'point', winner: 'far', reason: 'out' }], a, 0, state);
+      expect(eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0, state)).toEqual([]);
+    });
+  });
+
+  describe('against the real match', () => {
+    /** The phone messages a human receives while one real incoming ball is whiffed at, then optionally hit. */
+    function play(thenHit: boolean) {
+      const m = createMatch({ mode: 'singles', humans: 1, level: 'rookie', window: 'normal', length: 'set1', seed: 1 });
+      const as = { humans: 1 as const, slots: [7] };
+      const state = new Set<number>();
+      const out: PhoneMessage[] = [];
+      let now = 1000;
+      let before: number | null = null;
+      const step = (to: number) => {
+        now = to;
+        const events = m.update(to);
+        out.push(...eventMessages(events, as, before, state));
+        before = m.view().players.find((p) => p.receiving)?.id ?? null;
+        return events;
+      };
+      step(now);
+      while (!(m.expectedContact(0) !== null && m.view().phase === 'rally' && m.view().ball.bounces >= 1)) step(now + 1000 / 60);
+      const tStar = m.expectedContact(0)!;
+      const W = 130;
+      while (now < tStar - 1.5 * W) step(now + 1000 / 60);
+      // 1.5 W early with full topspin: far off the frame, a clean miss.
+      m.swing({ player: 0, t: now, power: 0.9, spin: 1 });
+      step(now + 1000 / 60);
+      if (thenHit) {
+        while (now < tStar) step(now + 1000 / 60);
+        m.swing({ player: 0, t: tStar, power: 0.5, spin: 0.2 });
+        step(now + 1000 / 60);
+        step(now + 1000 / 60);
+      }
+      const until = now + 3000;
+      while (now < until && m.view().phase === 'rally') step(now + 1000 / 60);
+      return out;
+    }
+
+    it('whiff then a good swing: a hit and no miss', () => {
+      const out = play(true).filter((x) => x.t === 'hit' || x.t === 'miss').map((x) => x.t);
+      expect(out[0]).toBe('hit');
+    });
+
+    it('whiff then nothing: exactly one miss', () => {
+      expect(play(false).filter((x) => x.t === 'miss')).toHaveLength(1);
+    });
+  });
+
   it('sends no miss for points lost another way, or for keyboard and CPU players', () => {
     expect(eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0)).toEqual([]);
     expect(eventMessages([{ type: 'point', winner: 'far', reason: 'missed' }], a, null)).toEqual([]);
-    expect(eventMessages([{ type: 'whiff', player: 1 }], { humans: 2, slots: [1, null] }, null)).toEqual([]);
+    expect(eventMessages([{ type: 'whiff', player: 1 }, { type: 'point', winner: 'far', reason: 'winner' }], { humans: 2, slots: [1, null] }, null)).toEqual([]);
   });
 
   it('maps the match phase to each player\'s prompt', () => {

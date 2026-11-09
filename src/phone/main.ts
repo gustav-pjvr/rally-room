@@ -6,7 +6,7 @@ import { Link, type LinkState } from './net';
 import { Motion } from './motion';
 import { RacketFace } from './racket';
 import {
-  asGameState, asMode, hapticPattern, isYourMove, mergeYou, pidFor, promptFor, screenFor, spinWord,
+  SWEET_SPOT_A, asGameState, asMode, hapticPattern, isYourMove, mergeYou, pidFor, promptFor, screenFor, spinWord,
   type GameState, type PhoneMode, type Screen, type You,
 } from './logic';
 
@@ -133,6 +133,7 @@ $<HTMLFormElement>('join-form').addEventListener('submit', (e) => {
   const data = new FormData(form);
   const name = String(data.get('name') || '').trim();
   chosen = { hand: String(data.get('hand') || 'Right'), colour: String(data.get('colour') || '#0F4C5C') };
+  for (const face of [playFace, lobbyFace]) face.setLeftHanded(chosen.hand === 'Left');
   try { localStorage.setItem(PREFS_KEY, JSON.stringify({ name, ...chosen })); } catch { /* private mode */ }
   $('join-error').hidden = true;
   joinPending(true);
@@ -240,9 +241,10 @@ function onMessage(m: WireMessage) {
       renderHud();
       break;
     case 'hit': {
-      const q = Number(m.quality), u = Number(m.u), v = Number(m.v);
-      (screen === 'lobby' ? lobbyFace : playFace).hit(u, v, q);
-      buzz(hapticPattern(q));
+      // u = a along the racket, v = b across it: where the ball really met the face (DESIGN.md section 3).
+      const q = Number(m.quality), a = Number(m.u), b = Number(m.v), frame = m.frame === true;
+      (screen === 'lobby' ? lobbyFace : playFace).hit(a, b, q, frame);
+      buzz(hapticPattern(frame ? 0 : q));
       break;
     }
     case 'miss':
@@ -305,8 +307,8 @@ const motion = new Motion({
     $<HTMLMeterElement>('power').value = power;
     $('power-value').textContent = `${Math.round(power * 100)}%`;
     $('spin-word').textContent = spinWord(swing.spin);
-    // Practice swings have no ball, so the ripple lands mid-strings, higher for topspin.
-    lobbyFace.hit(0, swing.spin * 0.6, 0.35 + 0.65 * power);
+    // Practice swings have no ball: the ripple starts at the sweet spot, nudged toward the top edge for topspin.
+    lobbyFace.hit(SWEET_SPOT_A, swing.spin * 0.5, 0.35 + 0.65 * power);
   },
   learned(report) {
     link.send({ t: 'profile', ...report });

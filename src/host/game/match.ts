@@ -5,6 +5,9 @@ import {
 import {
   GROUND_Y, buildPath, pathPosition, pathSpin, pathVelocity, speedKmh, vec, type BallPath,
 } from './physics';
+import {
+  CONTACT, locateContact, locateServeContact, rushedFrom, shank, strikeEffect, tiltLaunch, type Contact,
+} from './contact';
 import { createRng, gauss, type Rng } from './rng';
 import { awardPoint, createScore, other, scoreView, serveCourt, type ScoreState } from './scoring';
 import { launchVelocity, solveShot } from './solver';
@@ -20,9 +23,14 @@ import {
  * the ball from where it really was at the swing's time.
  */
 
-/** Hit window W per setting, ms. */
+/**
+ * Timing unit W per setting, ms: u = (Ts - T*) / W. At |u| about 1 the ball
+ * meets the edge of the string bed (DESIGN.md section 5).
+ */
 export const HIT_WINDOW_MS: Record<HitWindow, number> = { easy: 180, normal: 130, pro: 90 };
-/** A miss is declared only this long after T* + W, so late swing messages (up to 300 ms old, types.ts) still count. */
+/** Swings with |Ts - T*| up to ACCEPT * W meet the ball somewhere (bed, frame or a clean miss); later or earlier ones are ignored. */
+export const ACCEPT = 1.6;
+/** A miss is declared only this long after T* + ACCEPT * W, so late swing messages (up to 300 ms old, types.ts) still count. */
 export const MISS_GRACE_MS = 300;
 export const POINT_PAUSE_MS = 1600;
 export const FAULT_PAUSE_MS = 1000;
@@ -31,6 +39,7 @@ export const CPU_SERVE_DELAY_MS = 1000;
 /** Toss: released at 1.5 m going up at 5.4 m/s, so it peaks near 3 m and is back at 1.5 m after 1.1 s. */
 export const TOSS = { releaseY: 1.5, vy: 5.4, hitFromMs: 250, hitUntilMs: 1150 };
 const TOSS_APEX_MS = (TOSS.vy / 9.81) * 1000;
+const TOSS_APEX_Y = TOSS.releaseY + (TOSS.vy * TOSS.vy) / (2 * 9.81);
 /** Serve timing: |u| = 1 this far from the top of the toss, ms. */
 export const SERVE_TIMING_MS = 550;
 /** A serve struck below this height goes into the net. */
@@ -39,6 +48,8 @@ export const SERVE_MIN_HEIGHT = 1.9;
 export const RALLY = { slowFlight: 1.6, fastFlight: 0.75, shortDepth: 5, longDepth: 10.5 };
 /** Serves: flight time and depth past the net by power. */
 export const SERVE = { slowFlight: 1.2, fastFlight: 0.6, shortDepth: 4.4, longDepth: 5.7 };
+/** A CPU shot that loses power (1 - transfer) loses this much depth (m) and gains this much flight time (s) per unit. */
+const CPU_LOSS = { depth: 5, flight: 0.9 };
 const LINE = 0.025;
 /** Stance shown after a hit, ms, so the swing animation has a side. */
 const STANCE_HOLD_MS = 450;
@@ -97,18 +108,25 @@ interface Ball {
   tossExpire: number | null;
   /** The receiver starts running at this time (reaction). */
   moveFrom: number;
+  /** 0..1: how little time the receiver had to get to the contact point (contact.ts rushedFrom). */
+  rushed: number;
   whiffed: boolean;
   /** No longer decides anything (point over, fault). */
   dead: boolean;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+/** The sideline a shot aimed at x is heading for; down the middle, the outside of the side of the body the ball was on. */
+const wideSign = (aimX: number, bodySide: number) => (Math.abs(aimX) > 0.3 ? Math.sign(aimX) : Math.sign(bodySide) || 1);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 class RulesMatch implements GameMatch {
   private readonly rng: Rng;
   private readonly players: Player[];
+  /** Timing unit W, ms. */
   private readonly window: number;
+  /** Acceptance half-width ACCEPT * W, ms. */
+  private readonly accept: number;
   private readonly labels: [string, string];
   private score: ScoreState;
   private phase: Phase = 'serve-wait';
@@ -133,6 +151,7 @@ class RulesMatch implements GameMatch {
   constructor(private readonly config: MatchConfig, options: MatchOptions = {}) {
     this.rng = createRng(config.seed ?? Date.now());
     this.window = HIT_WINDOW_MS[config.window];
+    this.accept = this.window * ACCEPT;
     this.players = makePlayers(config);
     const humans = this.players.filter((p) => p.human).map((p) => p.name);
     this.labels = [humans.join(' & '), 'CPU'];
@@ -175,27 +194,24 @@ class RulesMatch implements GameMatch {
     }
     if (this.phase === 'toss' && ball?.kind === 'toss' && this.serverIndex === p.id) {
       const dt = swing.t - ball.t0;
-      if (dt >= TOSS.hitFromMs && dt <= TOSS.hitUntilMs) this.serve(ball, swing.t, swing.power, swing.spin, null);
+      if (dt >= TOSS.hitFromMs && dt <= TOSS.hitUntilMs) this.serve(ball, swing.t, swing.power, swing.spin, null, null);
       return;
     }
     if (this.phase !== 'rally' || !ball || ball.dead) return;
-    // Already served: a stronger swing inside the toss window replaces the serve.
+    // Already served: a stronger swing inside the toss window replaces the serve (if it touches the ball).
     const toss = ball.source;
     if (ball.kind === 'serve' && ball.hitter === p.id && toss?.kind === 'toss' && ball.cursor === 0
       && swing.power > ball.power) {
       const dt = swing.t - toss.t0;
-      if (dt >= TOSS.hitFromMs && dt <= TOSS.hitUntilMs) {
-        this.killBall(ball);
-        this.serve(toss, swing.t, swing.power, swing.spin, null);
-      }
+      if (dt >= TOSS.hitFromMs && dt <= TOSS.hitUntilMs) this.serve(toss, swing.t, swing.power, swing.spin, null, ball);
       return;
     }
-    // The incoming ball, not yet returned.
+    // The incoming ball, not yet returned. A whiff leaves it in play: a later swing in the window may still touch it.
     if (ball.receiver === p.id && ball.plan) {
       const tStar = ball.t0 + ball.plan.t * 1000;
-      // A swing can never strike the ball before its first bounce.
-      if (swing.t < this.firstBounceAt(ball)) return;
-      if (Math.abs(swing.t - tStar) > this.window || this.clock > tStar + this.window + MISS_GRACE_MS) return;
+      // A swing can never strike the ball before its first bounce, nor once it has bounced twice (dead).
+      if (swing.t < this.firstBounceAt(ball) || swing.t >= this.secondBounceAt(ball)) return;
+      if (Math.abs(swing.t - tStar) > this.accept || this.clock > tStar + this.accept + MISS_GRACE_MS) return;
       if (ball.plan.reachable) this.humanStrike(ball, p, swing);
       else if (!ball.whiffed) {
         ball.whiffed = true;
@@ -203,12 +219,14 @@ class RulesMatch implements GameMatch {
       }
       return;
     }
-    // Already returned: a stronger swing inside the same window replaces the shot.
+    // Already returned: a stronger swing inside the same window replaces the shot (a stronger whiff changes nothing).
     const source = ball.source;
     if (ball.hitter === p.id && source?.plan && source.receiver === p.id && ball.cursor === 0
       && swing.power > ball.power) {
       const tStar = source.t0 + source.plan.t * 1000;
-      if (swing.t >= this.firstBounceAt(source) && Math.abs(swing.t - tStar) <= this.window) this.humanStrike(source, p, swing, true);
+      if (swing.t >= this.firstBounceAt(source) && swing.t < this.secondBounceAt(source) && Math.abs(swing.t - tStar) <= this.accept) {
+        this.humanStrike(source, p, swing, true);
+      }
     }
   }
 
@@ -216,6 +234,12 @@ class RulesMatch implements GameMatch {
   private firstBounceAt(ball: Ball): number {
     const first = ball.path.events.find((e) => e.kind === 'bounce' && e.index === 1);
     return first ? ball.t0 + first.t * 1000 : -Infinity;
+  }
+
+  /** Host ms of the ball's second bounce: from then on it is dead and no swing can touch it (Infinity when it has none). */
+  private secondBounceAt(ball: Ball): number {
+    const second = ball.path.events.find((e) => e.kind === 'bounce' && e.index === 2);
+    return second ? ball.t0 + second.t * 1000 : Infinity;
   }
 
   expectedContact(player: number): number | null {
@@ -382,34 +406,59 @@ class RulesMatch implements GameMatch {
     this.toss(this.players[this.serverIndex], this.clock);
   }
 
-  /** Strike the serve from the toss at host time t. `cpu` carries the CPU's placement error. */
-  private serve(toss: Ball, t: number, power: number, spin: number, cpu: { u: number; sd: number } | null) {
-    toss.tossExpire = null;
-    toss.cpuHitAt = null;
+  /**
+   * Strike the serve from the toss at host time t. `cpu` carries the CPU's aim
+   * and placement error. `replacing` is a serve this swing replaces (a stronger
+   * swing in the toss window); it is only replaced if the new swing touches the
+   * ball. A human whiff leaves the toss falling. Returns false on a whiff.
+   */
+  private serve(
+    toss: Ball, t: number, power: number, spin: number, cpu: { u: number; sd: number } | null, replacing: Ball | null,
+  ): boolean {
     const server = this.players[toss.hitter];
     const contact = pathPosition(toss.path, (t - toss.t0) / 1000);
-    const u = cpu ? cpu.u : clamp((t - (toss.t0 + TOSS_APEX_MS)) / SERVE_TIMING_MS, -1, 1);
+    const timing = (t - (toss.t0 + TOSS_APEX_MS)) / SERVE_TIMING_MS;
+    const u = cpu ? cpu.u : clamp(timing, -1, 1);
+    const faceSd = cpu ? LEVELS[this.config.level].faceSd : 0;
+    let c = locateServeContact(timing, TOSS_APEX_Y - contact.y, faceSd, this.rng);
+    const low = contact.y < SERVE_MIN_HEIGHT;
+    if (c.kind === 'miss') {
+      if (server.human && !low) {
+        if (!replacing && !toss.whiffed) {
+          toss.whiffed = true;
+          this.emit({ type: 'whiff', player: server.id });
+        }
+        return false;
+      }
+      // A CPU never whiffs its serve, and a ball struck too low goes into the net regardless.
+      c = { ...c, kind: 'frame', quality: CONTACT.frameQuality };
+    }
+    if (replacing) this.killBall(replacing);
+    toss.tossExpire = null;
+    toss.cpuHitAt = null;
     const deuce = serveCourt(this.score) === 'deuce';
     const s = sideSign(server.side);
     const boxSign = -s * (deuce ? 1 : -1);
     // Early (u < 0) goes wide, late (u > 0) goes down the T.
     let x = boxSign * clamp(2.05 - u * 1.6, 0.3, 3.8);
-    let depth = lerp(SERVE.shortDepth, SERVE.longDepth, power);
-    if (cpu) {
-      x += gauss(this.rng, cpu.sd);
-      depth += gauss(this.rng, cpu.sd);
-    } else {
-      const risk = this.riskError(u, power, spin);
-      x += risk.x;
-      depth += risk.depth;
-    }
     let v0: Vec3;
-    if (contact.y < SERVE_MIN_HEIGHT) {
+    if (low) {
       // Struck too low: no angle to get over, it goes into the net.
       v0 = launchVelocity(contact, vec(x * 0.3, 0.5, 0), 0.45, spin);
+    } else if (c.kind === 'frame') {
+      v0 = this.shankVelocity(contact, server.side, spin, COURT.singlesHalfWidth);
     } else {
-      const flight = lerp(SERVE.slowFlight, SERVE.fastFlight, power);
-      v0 = solveShot(contact, vec(x, GROUND_Y, -s * depth), flight, spin).v0;
+      // A tip hit twists the serve wide, toward the sideline of its box.
+      const fx = strikeEffect(c, Math.sign(x) || boxSign, power, spin, this.rng);
+      const effective = power * fx.transfer;
+      let depth = lerp(SERVE.shortDepth, SERVE.longDepth, effective) + fx.ddepth;
+      x += fx.dx;
+      if (cpu) {
+        x += gauss(this.rng, cpu.sd);
+        depth += gauss(this.rng, cpu.sd);
+      }
+      const flight = lerp(SERVE.slowFlight, SERVE.fastFlight, effective);
+      v0 = tiltLaunch(solveShot(contact, vec(x, GROUND_Y, -s * Math.max(1.5, depth)), flight, spin).v0, fx.tilt);
     }
     const path = buildPath({ p0: contact, v0, spin });
     const ball = this.newBall('serve', path, t, server.id, power);
@@ -419,7 +468,8 @@ class RulesMatch implements GameMatch {
     this.rally = 1;
     this.ball = ball;
     this.assignReceiver(ball, this.serveReceiver());
-    this.recordHit(server, t, 1 - Math.abs(u), power, spin, u, v0);
+    this.recordHit(server, t, c, power, spin, u, v0);
+    return true;
   }
 
   private fault() {
@@ -477,7 +527,7 @@ class RulesMatch implements GameMatch {
     if (ball.kind === 'toss') {
       if (this.phase !== 'toss') return;
       const plan = cpuServe(this.config.level, this.rng, this.serveNumber);
-      this.serve(ball, this.clock, plan.power, plan.spin, { u: plan.u, sd: plan.sd });
+      this.serve(ball, this.clock, plan.power, plan.spin, { u: plan.u, sd: plan.sd }, null);
       return;
     }
     if (this.phase !== 'rally' || ball.receiver === null) return;
@@ -485,17 +535,38 @@ class RulesMatch implements GameMatch {
     const at = pathPosition(ball.path, (this.clock - ball.t0) / 1000);
     if (Math.hypot(at.x - p.pos.x, at.z - p.pos.z) > p.reach + 0.15) return;
     const tStar = ball.plan ? ball.t0 + ball.plan.t * 1000 : this.clock;
-    const u = clamp((this.clock - tStar) / this.window, -1, 1);
+    // The CPU's timing is measured against the Normal unit, whatever window the humans play with.
+    const u = (this.clock - tStar) / HIT_WINDOW_MS.normal;
     const halfWidth = this.halfWidth();
     const opponents = this.sidePlayers(other(p.side));
     const receiverX = opponents.length === 1 ? opponents[0].pos.x : null;
     const incoming = speedKmh(pathVelocity(ball.path, 0));
     const choice = cpuShot(this.config.level, this.rng, p.side, halfWidth, receiverX, pressureFrom(incoming));
     const p0 = this.contactFrom(ball, this.clock, p.side);
-    const v0 = choice.intoNet
-      ? launchVelocity(p0, choice.target, choice.flight, choice.spin)
-      : solveShot(p0, choice.target, choice.flight, choice.spin).v0;
-    this.launchRally(ball, p, this.clock, v0, p0, choice.spin, choice.power, 1 - Math.abs(u), u, false);
+    // The same contact model as a human, with the level's own placement error.
+    const c = locateContact({
+      u, spin: choice.spin, height: p0.y, rushed: ball.rushed, lateral: Math.abs(p0.x - p.pos.x),
+      extraNoise: LEVELS[this.config.level].faceSd,
+    }, this.rng);
+    if (c.kind === 'miss') {
+      // A clean miss: the ball runs on and the point is lost when it dies.
+      ball.whiffed = true;
+      this.emit({ type: 'whiff', player: p.id });
+      return;
+    }
+    let v0: Vec3;
+    if (choice.intoNet) v0 = launchVelocity(p0, choice.target, choice.flight, choice.spin);
+    else if (c.kind === 'frame') v0 = this.shankVelocity(p0, p.side, choice.spin, halfWidth);
+    else {
+      const fx = strikeEffect(c, wideSign(choice.target.x, p0.x - p.pos.x), choice.power, choice.spin, this.rng);
+      // Lost power makes the ball shorter and slower.
+      const loss = 1 - fx.transfer;
+      const toward = -sideSign(p.side);
+      const depth = Math.max(1.5, Math.abs(choice.target.z) + fx.ddepth - CPU_LOSS.depth * loss);
+      const target = vec(choice.target.x + fx.dx, GROUND_Y, toward * depth);
+      v0 = tiltLaunch(solveShot(p0, target, choice.flight + CPU_LOSS.flight * loss, choice.spin).v0, fx.tilt);
+    }
+    this.launchRally(ball, p, this.clock, v0, p0, choice.spin, choice.power, c, u, false);
   }
 
   private onMiss(ball: Ball) {
@@ -506,25 +577,53 @@ class RulesMatch implements GameMatch {
     else this.point(winner, ball.plan?.reachable ? 'missed' : 'winner');
   }
 
-  /** A human's swing inside the window: timing is aim (DESIGN.md section 5). */
-  private humanStrike(ball: Ball, p: Player, swing: SwingInput, upgrade = false) {
+  /**
+   * A human's swing inside the acceptance window (DESIGN.md section 5): timing
+   * is aim, and timing, spin and the situation decide where the ball meets the
+   * face. A contact beyond the frame is a whiff: the ball stays in play.
+   */
+  private humanStrike(ball: Ball, p: Player, swing: SwingInput, upgrade = false): boolean {
     const tStar = ball.t0 + (ball.plan?.t ?? 0) * 1000;
-    const u = clamp((swing.t - tStar) / this.window, -1, 1);
+    const u = (swing.t - tStar) / this.window;
     const p0 = this.contactFrom(ball, swing.t, p.side);
+    const c = locateContact({
+      u, spin: swing.spin, height: p0.y, rushed: ball.rushed, lateral: Math.abs(p0.x - p.pos.x),
+    }, this.rng);
+    if (c.kind === 'miss') {
+      if (!upgrade && !ball.whiffed) {
+        ball.whiffed = true;
+        this.emit({ type: 'whiff', player: p.id });
+      }
+      return false;
+    }
     const halfWidth = this.halfWidth();
-    const hitSide = Math.abs(p0.x) < 0.05 ? 1 : Math.sign(p0.x);
-    const risk = this.riskError(u, swing.power, swing.spin);
-    const x = hitSide * u * 0.75 * halfWidth + risk.x;
-    const depth = lerp(RALLY.shortDepth, RALLY.longDepth, swing.power) + risk.depth;
-    const flight = lerp(RALLY.slowFlight, RALLY.fastFlight, swing.power);
-    const target = vec(x, GROUND_Y, -sideSign(p.side) * depth);
-    const { v0 } = solveShot(p0, target, flight, swing.spin);
-    this.launchRally(ball, p, swing.t, v0, p0, swing.spin, swing.power, 1 - Math.abs(u), u, upgrade);
+    let v0: Vec3;
+    if (c.kind === 'frame') v0 = this.shankVelocity(p0, p.side, swing.spin, halfWidth);
+    else {
+      const hitSide = Math.abs(p0.x) < 0.05 ? 1 : Math.sign(p0.x);
+      const aim = hitSide * clamp(u, -1, 1) * 0.75 * halfWidth;
+      const fx = strikeEffect(c, wideSign(aim, p0.x - p.pos.x), swing.power, swing.spin, this.rng);
+      const effective = swing.power * fx.transfer;
+      const x = aim + fx.dx;
+      const depth = Math.max(1.5, lerp(RALLY.shortDepth, RALLY.longDepth, effective) + fx.ddepth);
+      const flight = lerp(RALLY.slowFlight, RALLY.fastFlight, effective);
+      const target = vec(x, GROUND_Y, -sideSign(p.side) * depth);
+      v0 = tiltLaunch(solveShot(p0, target, flight, swing.spin).v0, fx.tilt);
+    }
+    this.launchRally(ball, p, swing.t, v0, p0, swing.spin, swing.power, c, u, upgrade);
+    return true;
+  }
+
+  /** A frame hit: weak, in any direction, often into the net (contact.ts shank). */
+  private shankVelocity(p0: Vec3, side: Side, spin: number, halfWidth: number): Vec3 {
+    const sh = shank(this.rng, halfWidth);
+    if (sh.intoNet) return launchVelocity(p0, vec(sh.x * 0.5, sh.netY, 0), sh.netFlight, spin);
+    return solveShot(p0, vec(sh.x, GROUND_Y, -sideSign(side) * sh.depth), sh.flight, spin).v0;
   }
 
   private launchRally(
     from: Ball, p: Player, t: number, v0: Vec3, p0: Vec3, spin: number, power: number,
-    quality: number, u: number, upgrade: boolean,
+    contact: Contact, u: number, upgrade: boolean,
   ) {
     this.killBall(from);
     const path = buildPath({ p0, v0, spin });
@@ -533,26 +632,20 @@ class RulesMatch implements GameMatch {
     this.ball = ball;
     if (!upgrade) this.rally++;
     this.assignReceiver(ball, this.rallyReceiver(other(p.side), path));
-    this.recordHit(p, t, quality, power, spin, u, v0);
+    this.recordHit(p, t, contact, power, spin, u, v0);
   }
 
-  private recordHit(p: Player, t: number, quality: number, power: number, spin: number, u: number, v0: Vec3) {
+  private recordHit(p: Player, t: number, c: Contact, power: number, spin: number, u: number, v0: Vec3) {
     const kmh = Math.round(speedKmh(v0));
     p.lastSwingAt = t;
     const ballX = this.ball ? this.ball.path.segments[0].p0.x : p.pos.x;
     p.stanceHold = { stance: stanceFor(p.side, p.pos.x, ballX), until: this.clock + STANCE_HOLD_MS };
     if (p.human) this.stats.fastestShotKmh = Math.max(this.stats.fastestShotKmh, kmh);
     this.stats.longestRally = Math.max(this.stats.longestRally, this.rally);
-    this.emit({ type: 'hit', player: p.id, quality, power, spin, u, speedKmh: kmh });
-  }
-
-  /** Width error for extreme timing, length error for a flat full swing (DESIGN.md section 5). */
-  private riskError(u: number, power: number, spin: number) {
-    let x = 0;
-    let depth = 0;
-    if (Math.abs(u) > 0.8) x = gauss(this.rng, 1.6 * (Math.abs(u) - 0.8) / 0.2);
-    if (power > 0.9 && Math.abs(spin) < 0.2) depth = gauss(this.rng, 1.8 * (power - 0.9) / 0.1);
-    return { x, depth };
+    this.emit({
+      type: 'hit', player: p.id, quality: c.quality, power, spin, u, speedKmh: kmh,
+      contact: { a: c.a, b: c.b, frame: c.kind === 'frame' },
+    });
   }
 
   /** Ball position at host time t from the ball's history, kept on the hitter's side of the net. */
@@ -567,14 +660,21 @@ class RulesMatch implements GameMatch {
     if (receiver === null) return;
     const p = this.players[receiver];
     const now = (this.clock - ball.t0) / 1000;
-    // A human's hit window opens W before T*: keep T* at least W after the first bounce.
-    ball.plan = planContact(ball.path, now, this.mover(p), p.human ? this.window / 1000 : undefined);
+    // A human's acceptance window spans T* +- ACCEPT * W: keep T* at least that long after the first bounce and
+    // before the second (when the ball leaves room), so the window never opens on a ball not yet bounced or closes on a dead one.
+    const room = p.human ? this.accept / 1000 : undefined;
+    ball.plan = planContact(ball.path, now, this.mover(p), room, room);
     ball.moveFrom = this.clock + p.reaction * 1000;
+    if (ball.plan) {
+      const run = Math.hypot(ball.plan.stand.x - p.pos.x, ball.plan.stand.z - p.pos.z) / p.speed;
+      ball.rushed = rushedFrom(ball.plan.t - now - p.reaction - run, ball.plan.reachable);
+    }
     const second = ball.path.events.find((e) => e.kind === 'bounce' && e.index === 2);
     const last = ball.path.events[ball.path.events.length - 1];
     const deadAt = ball.t0 + (second ? second.t : (last?.t ?? 0) + 1) * 1000;
     if (p.human) {
-      ball.missAt = ball.plan ? ball.t0 + ball.plan.t * 1000 + this.window + MISS_GRACE_MS : deadAt;
+      // The window closes at the second bounce at the latest: a dead ball cannot be struck (late messages still count for MISS_GRACE_MS).
+      ball.missAt = ball.plan ? Math.min(ball.t0 + ball.plan.t * 1000 + this.accept, deadAt) + MISS_GRACE_MS : deadAt;
     } else {
       ball.missAt = deadAt;
       if (ball.plan?.reachable) {
@@ -586,7 +686,7 @@ class RulesMatch implements GameMatch {
   private newBall(kind: Ball['kind'], path: BallPath, t0: number, hitter: number, power: number): Ball {
     return {
       kind, path, t0, cursor: 0, hitter, receiver: null, plan: null, boxSign: 0, source: null, power,
-      cpuHitAt: null, missAt: null, tossExpire: null, moveFrom: t0, whiffed: false, dead: false,
+      cpuHitAt: null, missAt: null, tossExpire: null, moveFrom: t0, rushed: 0, whiffed: false, dead: false,
     };
   }
 

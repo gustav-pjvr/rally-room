@@ -196,8 +196,11 @@ export type PhoneMessage =
   | { t: 'mode'; to: number; mode: 'lobby' | 'play' }
   | { t: 'you'; to: number; player: number | null; color: string; team: string | null }
   | { t: 'game'; to: number; state: GameState; score: string; message: string | null }
-  | { t: 'hit'; to: number; quality: number; u: number; v: number }
+  | { t: 'hit'; to: number; quality: number; u: number; v: number; frame: boolean }
   | { t: 'miss'; to: number };
+
+/** Face coordinates sent to the phone are clamped to the frame's outer edge (contact.ts CONTACT.frameEdge). */
+const FACE_LIMIT = 1.25;
 
 /** What a player's phone should prompt, from the match view. */
 export function gameState(view: MatchView, player: number, paused: boolean): GameState {
@@ -219,26 +222,49 @@ export function scoreText(view: MatchView): string {
 const clamp = (v: number, lo: number, hi: number) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0);
 
 /**
- * hit and miss messages for one frame's events. `receiverBefore` is the
- * player who was receiving in the previous frame's view: a point lost with
- * reason 'missed' is that player's miss, and so is an ace: an unreturned
- * serve shakes the receiving phone like any other missed ball.
+ * hit and miss messages for one frame's events. A hit carries where the ball
+ * met the face: `u` = a (along the racket, -1 throat .. +1 tip), `v` = b
+ * (across it, -1 bottom .. +1 top), `frame` for a frame hit.
+ *
+ * A phone gets at most one miss per ball, and only once the outcome is known.
+ * A whiff does not end the chance (a later swing in the window may still touch
+ * the ball, DESIGN.md section 3), so a whiff alone sends nothing: it is only
+ * remembered in `whiffed` (kept by the caller across frames). The point decides:
+ * 'missed' and 'ace' are the receiver's miss (`receiverBefore` is the player who
+ * was receiving in the previous frame's view; an unreturned serve shakes the
+ * receiving phone like any other missed ball), and 'winner' is a miss for every
+ * remembered whiffer (an unreachable ball they swung at). A hit by the whiffer
+ * forgets the whiff, and every point clears the memory.
  */
-export function eventMessages(events: MatchEvent[], a: Assignment, receiverBefore: number | null): PhoneMessage[] {
+export function eventMessages(
+  events: MatchEvent[], a: Assignment, receiverBefore: number | null, whiffed: Set<number> = new Set(),
+): PhoneMessage[] {
   const out: PhoneMessage[] = [];
   const missed = new Set<number>();
   const slotOf = (player: number) => a.slots[player] ?? null;
+  const miss = (player: number | null) => {
+    if (player === null || missed.has(player)) return;
+    const to = slotOf(player);
+    if (to === null) return;
+    missed.add(player);
+    out.push({ t: 'miss', to });
+  };
   for (const e of events) {
     if (e.type === 'hit') {
+      whiffed.delete(e.player);
       const to = slotOf(e.player);
-      if (to !== null) out.push({ t: 'hit', to, quality: clamp(e.quality, 0, 1), u: clamp(e.u, -1, 1), v: clamp(e.spin, -1, 1) });
-    } else if (e.type === 'whiff' || (e.type === 'point' && (e.reason === 'missed' || e.reason === 'ace'))) {
-      const player = e.type === 'whiff' ? e.player : receiverBefore;
-      if (player === null || missed.has(player)) continue;
-      const to = slotOf(player);
-      if (to === null) continue;
-      missed.add(player);
-      out.push({ t: 'miss', to });
+      if (to !== null) {
+        out.push({
+          t: 'hit', to, quality: clamp(e.quality, 0, 1),
+          u: clamp(e.contact.a, -FACE_LIMIT, FACE_LIMIT), v: clamp(e.contact.b, -FACE_LIMIT, FACE_LIMIT), frame: e.contact.frame === true,
+        });
+      }
+    } else if (e.type === 'whiff') {
+      whiffed.add(e.player);
+    } else if (e.type === 'point') {
+      if (e.reason === 'missed' || e.reason === 'ace') miss(receiverBefore);
+      else if (e.reason === 'winner') for (const player of whiffed) miss(player);
+      whiffed.clear();
     }
   }
   return out;

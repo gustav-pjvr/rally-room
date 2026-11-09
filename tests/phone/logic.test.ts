@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  asGameState, asMode, backoffDelay, contrast, hapticPattern, isYourMove, nearFrame, parseHex,
+  asGameState, asMode, backoffDelay, contrast, facePoint, hapticPattern, isYourMove, nearFrame, parseHex,
   mergeYou, pidFor, pidKey, promptFor, readableOn, rippleStyle, screenFor, spinWord,
 } from '../../src/phone/logic';
 
@@ -51,6 +51,22 @@ describe('feedback', () => {
     expect(hi.alpha).toBeGreaterThan(lo.alpha);
     expect(hi.amplitude).toBeGreaterThan(lo.amplitude);
     expect(rippleStyle(5).alpha).toBeLessThanOrEqual(1);
+  });
+  it('places the real contact on the face: tip at the top, top edge to the right (left for a left hand)', () => {
+    expect(facePoint(-0.15, 0)).toEqual({ x: 0, y: -0.15, rim: false });
+    // Tip hit: high on the screen.
+    expect(facePoint(0.8, 0).y).toBeCloseTo(0.8, 9);
+    // Throat hit: low on the screen.
+    expect(facePoint(-0.8, 0).y).toBeCloseTo(-0.8, 9);
+    // Top edge: right for a right-handed grip, left for a left-handed one.
+    expect(facePoint(0, 0.7).x).toBeCloseTo(0.7, 9);
+    expect(facePoint(0, 0.7, true).x).toBeCloseTo(-0.7, 9);
+    // A frame hit sits on the rim, in the direction it struck.
+    const rim = facePoint(-1.1, 0.2);
+    expect(rim.rim).toBe(true);
+    expect(Math.hypot(rim.x, rim.y)).toBeCloseTo(1, 9);
+    expect(rim.y).toBeLessThan(-0.9);
+    expect(facePoint(Number.NaN, Number.POSITIVE_INFINITY)).toEqual({ x: 0, y: 0, rim: false });
   });
   it('reads hits near the frame as mishits', () => {
     expect(nearFrame(0, 0)).toBe(false);

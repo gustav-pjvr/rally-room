@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  HIT_WINDOW_MS, MISS_GRACE_MS, TOSS, createMatch, type GameMatch, type MatchOptions,
+  ACCEPT, HIT_WINDOW_MS, MISS_GRACE_MS, TOSS, createMatch, type GameMatch, type MatchOptions,
 } from '../../src/host/game/match';
 import { COURT, type MatchConfig, type MatchEvent } from '../../src/host/game/types';
 
@@ -87,7 +87,11 @@ describe('match: hitting', () => {
     const hit = s.untilEvent('hit');
     expect(hit.player).toBe(0);
     expect(hit.u).toBeCloseTo(0, 9);
-    expect(hit.quality).toBeCloseTo(1, 9);
+    // Perfect timing meets the sweet spot, give or take the small placement noise.
+    expect(hit.contact.frame).toBe(false);
+    expect(Math.abs(hit.contact.a + 0.15)).toBeLessThan(0.2);
+    expect(Math.abs(hit.contact.b)).toBeLessThan(0.2);
+    expect(hit.quality).toBeGreaterThan(0.85);
     expect(hit.speedKmh).toBeGreaterThan(30);
     expect(s.m.view().rally).toBe(2);
     const landing = s.m.view().ball.landing!;
@@ -96,8 +100,8 @@ describe('match: hitting', () => {
     expect(bounce.in).toBe(true);
     expect(bounce.pos.z).toBeLessThan(0);
     expect(bounce.pos.z).toBeCloseTo(landing.z, 6);
-    // Perfect timing aims at the middle: target x = hitSide * 0 * ...
-    expect(Math.abs(bounce.pos.x)).toBeLessThan(1e-6);
+    // Perfect timing aims at the middle; a centred contact adds almost no direction error.
+    expect(Math.abs(bounce.pos.x)).toBeLessThan(0.5);
   });
 
   it('an early swing goes cross-court and a late one down the line', () => {
@@ -112,12 +116,16 @@ describe('match: hitting', () => {
       s.m.swing({ player: 0, t: ts, power: 0.6, spin: 0.2 });
       const hit = s.untilEvent('hit');
       expect(hit.u).toBeCloseTo(u, 6);
-      expect(hit.quality).toBeCloseTo(0.4, 6);
+      // Early reaches toward the tip, late is cramped toward the throat; both are off the sweet spot.
+      if (u < 0) expect(hit.contact.a).toBeGreaterThan(0.2);
+      else expect(hit.contact.a).toBeLessThan(-0.35);
+      expect(hit.quality).toBeGreaterThan(0.2);
+      expect(hit.quality).toBeLessThan(0.8);
       const bounce = s.untilEvent('bounce');
       expect(bounce.in).toBe(true);
-      // Early (u < 0): the opposite side to the contact. Late: the same side.
+      // Early (u < 0): the opposite side to the contact. Late: the same side. Aim 0.6 * 0.75 * half width, plus scatter.
       expect(Math.sign(bounce.pos.x)).toBe(u < 0 ? -hitSide : hitSide);
-      expect(Math.abs(bounce.pos.x)).toBeCloseTo(0.6 * 0.75 * COURT.singlesHalfWidth, 6);
+      expect(Math.abs(Math.abs(bounce.pos.x) - 0.6 * 0.75 * COURT.singlesHalfWidth)).toBeLessThan(1.5);
     }
   });
 
@@ -135,15 +143,15 @@ describe('match: hitting', () => {
     expect(s.log.some((x) => x.e.type === 'whiff')).toBe(false);
   });
 
-  it('with no swing the point is lost only after T* + W + 300 ms', () => {
+  it('with no swing the point is lost only after T* + ACCEPT * W + 300 ms', () => {
     const s = sim();
     const tStar = toRallyIncoming(s);
     const before = s.log.length;
     const point = s.untilEvent('point');
     expect(point).toEqual({ type: 'point', winner: 'far', reason: 'missed' });
     const when = s.log.slice(before).find((x) => x.e.type === 'point')!.now;
-    expect(when).toBeGreaterThanOrEqual(tStar + W + MISS_GRACE_MS);
-    expect(when).toBeLessThan(tStar + W + MISS_GRACE_MS + FRAME + 1e-6);
+    expect(when).toBeGreaterThanOrEqual(tStar + ACCEPT * W + MISS_GRACE_MS);
+    expect(when).toBeLessThan(tStar + ACCEPT * W + MISS_GRACE_MS + FRAME + 1e-6);
     expect(s.m.view().phase).toBe('point-over');
     expect(s.m.view().message).toBe('Missed');
   });
@@ -161,7 +169,7 @@ describe('match: hitting', () => {
     stepTo(s, tStar + 150);
     s.m.swing({ player: 0, t: tStar, power: 0.6, spin: 0.3 });
     const hit = s.untilEvent('hit');
-    expect(hit.quality).toBeCloseTo(1, 9);
+    expect(hit.quality).toBeGreaterThan(0.85);
     expect(s.m.view().ball.vel.z).toBeLessThan(0);
     const bounce = s.untilEvent('bounce');
     expect(bounce.in).toBe(true);
@@ -182,14 +190,16 @@ describe('match: hitting', () => {
     expect(s.m.view().rally).toBe(2);
   });
 
-  it('the hit window depends on the setting: 100 ms late is in for easy, out for pro', () => {
+  it('the window depends on the setting: 160 ms late touches the ball on easy, is ignored on pro', () => {
+    // Easy accepts 1.6 * 180 = 288 ms; pro 1.6 * 90 = 144 ms.
     for (const [window, hits] of [['easy', true], ['pro', false]] as const) {
       const s = sim({ window });
       const tStar = toIncoming(s);
-      stepTo(s, tStar + 100);
-      s.m.swing({ player: 0, t: tStar + 100, power: 0.5, spin: 0 });
+      stepTo(s, tStar + 160);
+      s.m.swing({ player: 0, t: tStar + 160, power: 0.5, spin: 0 });
       const events = s.step();
       expect(events.some((e) => e.type === 'hit')).toBe(hits);
+      expect(events.some((e) => e.type === 'whiff')).toBe(false);
     }
   });
 });
@@ -210,7 +220,8 @@ describe('match: serving', () => {
     const releaseY = TOSS.releaseY;
     s.m.swing({ player: 0, t: apex, power: 0.7, spin: 0.3 });
     const hit = s.untilEvent('hit', 1);
-    expect(hit.quality).toBeCloseTo(1, 6);
+    expect(hit.quality).toBeGreaterThan(0.85);
+    expect(hit.contact.frame).toBe(false);
     expect(s.m.view().phase).toBe('rally');
     // Near server, deuce court: the ball goes to the far deuce box (x < 0).
     const bounce = s.untilEvent('bounce');
@@ -339,5 +350,178 @@ describe('match: full matches', () => {
     expect(players[1].name).toBe('Player 2');
     expect(players[1].color).toMatch(/^#/);
     expect(players[2].name).toBe('CPU 1');
+  });
+});
+
+describe('match: the contact point (DESIGN.md section 5)', () => {
+  /** Swing once at T* + k * W for seeds 1..n; returns what the swing produced. */
+  function swingAt(k: number, spin: number, n = 20, power = 0.6) {
+    const out: { hit?: Extract<MatchEvent, { type: 'hit' }>; whiff: boolean; s: Sim; tStar: number }[] = [];
+    for (let seed = 1; seed <= n; seed++) {
+      const s = sim({ seed });
+      const tStar = toIncoming(s);
+      const t = tStar + k * W;
+      stepTo(s, t);
+      s.m.swing({ player: 0, t, power, spin });
+      const events = s.step();
+      const hit = events.find((e) => e.type === 'hit') as Extract<MatchEvent, { type: 'hit' }> | undefined;
+      out.push({ hit, whiff: events.some((e) => e.type === 'whiff'), s, tStar });
+    }
+    return out;
+  }
+
+  it('a late swing past the bed edge hits the frame: weak, quality 0.05, r between 1 and 1.25', () => {
+    // Full-power swings: the frame takes the pace off (a shank is a slow, loopy ball or one into the net).
+    const centred = swingAt(0, 0.3, 20, 1).map((x) => x.hit!);
+    const late = swingAt(1.3, 0, 20, 1);
+    const frames = late.flatMap((x) => (x.hit?.contact.frame ? [x.hit] : []));
+    expect(frames.length).toBeGreaterThanOrEqual(10);
+    for (const f of frames) {
+      expect(f.quality).toBe(0.05);
+      const r = Math.hypot(f.contact.a, f.contact.b);
+      expect(r).toBeGreaterThan(1);
+      expect(r).toBeLessThanOrEqual(1.25);
+    }
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(frames.map((f) => f.speedKmh))).toBeLessThan(mean(centred.map((h) => h.speedKmh)) * 0.6);
+    expect(centred.every((h) => !h.contact.frame && h.quality > 0.8)).toBe(true);
+  });
+
+  it('beyond the frame is a clean miss: a whiff, the ball stays in play and the point is lost', () => {
+    const results = swingAt(1.55, 0);
+    const whiffs = results.filter((x) => x.whiff);
+    expect(whiffs.length).toBeGreaterThanOrEqual(10);
+    for (const { s, hit } of whiffs) {
+      expect(hit).toBeUndefined();
+      expect(s.m.view().phase).toBe('rally');
+      // The incoming ball here is the CPU's serve, so the unreturned ball is an ace.
+      expect(s.untilEvent('point')).toMatchObject({ type: 'point', winner: 'far' });
+      expect(s.log.filter((x) => x.e.type === 'point').map((x) => (x.e as { reason: string }).reason)).toEqual(['ace']);
+    }
+  });
+
+  it('an early whiff does not end the chance: the real swing after it still hits', () => {
+    const s = sim();
+    const tStar = toIncoming(s);
+    // 1.5 W early with full topspin: a = 1.35, b = 1.05, far off the frame.
+    stepTo(s, tStar - 1.5 * W);
+    s.m.swing({ player: 0, t: tStar - 1.5 * W, power: 0.9, spin: 1 });
+    expect(s.step().some((e) => e.type === 'whiff')).toBe(true);
+    stepTo(s, tStar);
+    s.m.swing({ player: 0, t: tStar, power: 0.5, spin: 0.2 });
+    const hit = s.untilEvent('hit', 2);
+    expect(hit.player).toBe(0);
+    expect(hit.contact.frame).toBe(false);
+    expect(s.m.view().rally).toBe(2);
+  });
+
+  it('a stronger swing that would whiff never undoes a hit', () => {
+    const s = sim();
+    const tStar = toIncoming(s);
+    stepTo(s, tStar);
+    s.m.swing({ player: 0, t: tStar, power: 0.4, spin: 0.2 });
+    expect(s.step().some((e) => e.type === 'hit')).toBe(true);
+    const t = tStar + 1.58 * W;
+    stepTo(s, t);
+    s.m.swing({ player: 0, t, power: 1, spin: 1 });
+    const events = s.step();
+    expect(events.some((e) => e.type === 'hit' || e.type === 'whiff')).toBe(false);
+    expect(s.m.view().ball.vel.z).toBeLessThan(0);
+  });
+
+  it('a swing just outside the acceptance window is still ignored (not a whiff)', () => {
+    for (const k of [-1.65, 1.65]) {
+      const s = sim();
+      const tStar = toIncoming(s);
+      stepTo(s, tStar + k * W);
+      s.m.swing({ player: 0, t: tStar + k * W, power: 1, spin: 0 });
+      expect(s.step().some((e) => e.type === 'hit' || e.type === 'whiff'), `k ${k}`).toBe(false);
+    }
+  });
+
+  it('serve contact: the top of the toss is clean; a late serve is low on the face toward the throat', () => {
+    const top = sim({}, { firstServer: 'near' });
+    top.m.swing({ player: 0, t: top.now, power: 0.3, spin: 0 });
+    top.step();
+    const apex = top.m.expectedContact(0)!;
+    stepTo(top, apex);
+    top.m.swing({ player: 0, t: apex, power: 0.6, spin: 0 });
+    const clean = top.untilEvent('hit', 2);
+    expect(clean.contact.frame).toBe(false);
+    expect(Math.abs(clean.contact.a + 0.15)).toBeLessThan(0.2);
+
+    const s = sim({}, { firstServer: 'near' });
+    s.m.swing({ player: 0, t: s.now, power: 0.3, spin: 0 });
+    const tossAt = s.now;
+    s.step();
+    // 400 ms after the top of the toss: the ball has dropped about 0.8 m but is still above 1.9 m.
+    const t = tossAt + 950;
+    stepTo(s, t);
+    expect(s.m.view().ball.pos.y).toBeGreaterThan(1.9);
+    s.m.swing({ player: 0, t, power: 0.6, spin: 0 });
+    const late = s.untilEvent('hit', 2);
+    expect(late.contact.a).toBeLessThan(-0.5);
+    expect(late.contact.b).toBeLessThan(-0.3);
+    expect(late.quality).toBeLessThan(clean.quality);
+  });
+
+  it('CPUs use the same model: every CPU hit carries a contact, and a Rookie sometimes mishits', () => {
+    const { s } = playMatch({ seed: 21, level: 'rookie', length: 'set1' }, 60 * 60 * 30);
+    const cpuHits = s.log.flatMap((x) => (x.e.type === 'hit' && x.e.player === 1 ? [x.e] : []));
+    expect(cpuHits.length).toBeGreaterThan(50);
+    expect(cpuHits.every((h) => Number.isFinite(h.contact.a) && Number.isFinite(h.contact.b))).toBe(true);
+    const mishits = cpuHits.filter((h) => h.contact.frame).length
+      + s.log.filter((x) => x.e.type === 'whiff' && x.e.player === 1).length;
+    expect(mishits).toBeGreaterThan(0);
+    expect(new Set(cpuHits.map((h) => Math.round(h.quality * 10))).size).toBeGreaterThan(3);
+  });
+});
+
+describe('match: a ball that has bounced twice is dead (DESIGN.md sections 3 and 5)', () => {
+  /** Step until the incoming ball's second bounce is reported (or the point ends); returns the first frame at or after it. */
+  function toSecondBounce(s: Sim): number {
+    s.until(() => s.m.view().ball.bounces >= 2 || s.m.view().phase !== 'rally');
+    return s.now;
+  }
+
+  for (const window of ['easy', 'normal'] as const) {
+    for (const kind of ['serve', 'rally'] as const) {
+      it(`${window}, ${kind}: a swing at or after the second bounce never hits`, () => {
+        let scanned = 0;
+        for (let seed = 1; seed <= 80; seed++) {
+          const s = sim({ seed, window });
+          try {
+            if (kind === 'serve') toIncoming(s);
+            else toRallyIncoming(s);
+          } catch {
+            continue;
+          }
+          const hitsBefore = s.log.filter((x) => x.e.type === 'hit').length;
+          const t = toSecondBounce(s);
+          if (s.m.view().phase !== 'rally') continue;
+          scanned++;
+          s.m.swing({ player: 0, t, power: 0.6, spin: 0 });
+          const events = s.step();
+          expect(events.some((e) => e.type === 'hit'), `seed ${seed}`).toBe(false);
+          expect(s.log.filter((x) => x.e.type === 'hit').length, `seed ${seed}`).toBe(hitsBefore);
+        }
+        expect(scanned).toBeGreaterThanOrEqual(4);
+      });
+    }
+  }
+
+  it('with no swing the point ends no later than the second bounce plus the grace', () => {
+    for (const window of ['easy', 'normal'] as const) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const s = sim({ seed, window });
+        toIncoming(s);
+        const second = toSecondBounce(s);
+        const before = s.log.length;
+        if (s.m.view().phase === 'rally') s.untilEvent('point');
+        const found = s.log.slice(before).find((x) => x.e.type === 'point');
+        const when = found ? found.now : second;
+        expect(when, `${window} seed ${seed}`).toBeLessThanOrEqual(second + MISS_GRACE_MS + FRAME + 1e-6);
+      }
+    }
   });
 });

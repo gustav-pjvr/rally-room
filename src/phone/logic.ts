@@ -117,6 +117,26 @@ export function rippleStyle(quality: number) {
   };
 }
 
+/** The sweet spot along the racket (a), as on the host (src/host/game/contact.ts SWEET_SPOT). */
+export const SWEET_SPOT_A = -0.15;
+
+/**
+ * Where a contact sits on the phone's racket face. The host sends `a` along the
+ * racket (-1 throat .. +1 tip) and `b` across it (-1 bottom edge .. +1 top edge).
+ * On screen the tip is at the top, so `a` runs up; `b` runs across, with the
+ * top edge on the right for a right-handed grip (the screen's right edge faces
+ * up in a forehand) and on the left for a left-handed one. Returns x (-1 left
+ * .. +1 right) and y (-1 bottom .. +1 top) in string-bed units; a point off the
+ * bed (a frame hit) is moved onto the rim and marked `rim`.
+ */
+export function facePoint(a: number, b: number, leftHanded = false): { x: number; y: number; rim: boolean } {
+  const y = Number.isFinite(a) ? a : 0;
+  const x = (Number.isFinite(b) ? b : 0) * (leftHanded ? -1 : 1);
+  const r = Math.hypot(x, y);
+  if (r <= 1) return { x, y, rim: false };
+  return { x: x / r, y: y / r, rim: true };
+}
+
 /** A hit near the frame: reads as a mishit (DESIGN.md section 1). */
 export function nearFrame(u: number, v: number): boolean {
   return Math.hypot(u, v) > 0.8 || Math.abs(u) > 0.85 || Math.abs(v) > 0.85;

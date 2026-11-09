@@ -210,27 +210,6 @@ export class RacketAxisLearner {
   }
 }
 
-/** Removes a player's personal spin offset: their median spin, limited to +-0.25. */
-export class SpinBaseline {
-  static readonly WINDOW = 25;
-  static readonly MIN_SWINGS = 6;
-  static readonly LIMIT = 0.25;
-  private recent: number[] = [];
-
-  add(spin: number): void {
-    this.recent.push(spin);
-    if (this.recent.length > SpinBaseline.WINDOW) this.recent.shift();
-  }
-
-  get value(): number {
-    if (this.recent.length < SpinBaseline.MIN_SWINGS) return 0;
-    const sorted = [...this.recent].sort((a, b) => a - b);
-    const mid = sorted.length >> 1;
-    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    return Math.max(-SpinBaseline.LIMIT, Math.min(SpinBaseline.LIMIT, median));
-  }
-}
-
 /**
  * Notices a gyro that tops out early: three or more swings whose largest
  * single-axis rate sits within 1% of the same maximum.

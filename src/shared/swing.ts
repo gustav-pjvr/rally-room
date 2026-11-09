@@ -1,6 +1,6 @@
 import type { RawSample, Swing } from './protocol';
 import {
-  AxisCalibrator, IDENTITY, RacketAxisLearner, SaturationWatch, SpinBaseline, applyMap, mapKey,
+  AxisCalibrator, IDENTITY, RacketAxisLearner, SaturationWatch, applyMap, mapKey,
   type AxisMap,
 } from './profile';
 
@@ -22,6 +22,16 @@ export const TUNING = {
   /** Accelerometer readings further than this from 1 g are not trusted as gravity. */
   GRAVITY_TOLERANCE: 2,
   MAX_DT_MS: 50,
+  /**
+   * Spin is the racket head's upward path at the peak. From three labelled
+   * sessions (2026-11-09) a fixed rule beats any running per-player offset:
+   * measured flat swings sit between -0.12 and +0.22, so the neutral point is
+   * +0.05 and that band is scaled to the +-0.2 "flat" band the game and phone
+   * use. (A running median offset was tried and removed: a player who hits
+   * mostly topspin had it centred away to flat.)
+   */
+  SPIN_NEUTRAL: 0.05,
+  SPIN_SCALE: 0.2 / 0.17,
 };
 export type Tuning = typeof TUNING;
 
@@ -176,7 +186,6 @@ export class SwingDetector {
   private noGyro = 0;
   private readonly calibrator: AxisCalibrator;
   private readonly racket = new RacketAxisLearner();
-  private readonly baseline = new SpinBaseline();
   private readonly saturation = new SaturationWatch();
   private savedMap: AxisMap | undefined;
   private history: { t: number; accel: Vector; up: Vector }[] = [];
@@ -243,8 +252,7 @@ export class SwingDetector {
     let spin = 0;
     if (this.mode === 'gyro') {
       const ownSpin = features(peakRotation, peakUp, peak, tuning, this.racket.axis).spin;
-      spin = clamp(ownSpin - this.baseline.value, -1, 1);
-      this.baseline.add(ownSpin);
+      spin = clamp((ownSpin - tuning.SPIN_NEUTRAL) * tuning.SPIN_SCALE, -1, 1);
       this.racket.add(this.history.filter((h) => Math.abs(h.t - result.swing!.tp) <= 25), peakRotation);
       const before = this.saturation.cap;
       this.saturation.add(peakRotation);
@@ -270,7 +278,7 @@ export class SwingDetector {
       axisMoves: this.calibrator.count,
       racket: this.racket.axis,
       racketSwings: this.racket.count,
-      spinOffset: this.baseline.value,
+      spinOffset: this.tuning.SPIN_NEUTRAL,
       gyroCap: this.saturation.cap,
     };
   }

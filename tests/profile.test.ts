@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AxisCalibrator, RacketAxisLearner, SaturationWatch, SpinBaseline, applyMap, mapKey } from '../src/shared/profile';
+import { AxisCalibrator, RacketAxisLearner, SaturationWatch, applyMap, mapKey } from '../src/shared/profile';
 import { SwingDetector, type Vector } from '../src/shared/swing';
 import { asPhone, loadLabelled, play, type FakePhone } from './fixtures/phones';
 
@@ -77,14 +77,6 @@ describe('automatic phone setup', () => {
 });
 
 describe('profile parts', () => {
-  it('spin baseline is the median, limited to 0.25', () => {
-    const b = new SpinBaseline();
-    [-0.4, -0.3, -0.2, -0.3, -0.5].forEach((v) => b.add(v));
-    expect(b.value).toBe(0); // not enough swings yet
-    b.add(-0.3);
-    expect(b.value).toBe(-0.25);
-  });
-
   it('saturation needs three swings at the same top', () => {
     const w = new SaturationWatch();
     w.add([500, 10, 10]); w.add([300, 499.9, 0]);
