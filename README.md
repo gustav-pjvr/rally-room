@@ -46,7 +46,16 @@ npm test          # unit tests, including replays of real phone recordings
 npm run build     # type-check and production build
 ```
 
+## Spin calibration (optional)
+
+On the phone's practice screen, "Teach your racket your spin" learns how you
+swing slice, flat and topspin (3 swings of each, forehand and backhand, about a
+minute). It is saved on that phone under your name. Without it, an automatic
+rule is used.
+
 ## Status
 
-Co-op against the computer is playable (singles and doubles). Player against
-player with split screen is planned.
+Co-op against the computer is playable: singles, or doubles with one or two
+phones. Where the ball meets the racket face (sweet spot, tip, throat, edges,
+frame) shapes every shot. Player against player with split screen is planned.
+See `docs/HANDOVER.md` for where the work stands.

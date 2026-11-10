@@ -546,27 +546,33 @@ index.html               host game page
 play/index.html          phone controller page
 lab/index.html           sensor lab page
 src/shared/protocol.ts   message types, room-code alphabet
-src/shared/swing.ts      swing detector (pure) + TUNING
+src/shared/swing.ts      swing detector (pure) + TUNING, fixed spin rule
+src/shared/profile.ts    automatic phone setup (axes, units, racket axis, gyro cap)
+src/shared/calibration.ts optional per-player spin calibration (pure)
 src/shared/clock.ts      clock-sync estimator (pure)
-src/phone/*.ts           permission, sensors, UI, wake lock, racket face
-src/host/net.ts          host connection, players, clock sync
-src/host/game/*.ts       physics, solver, scoring, AI, render, audio
+src/phone/*.ts           permission, sensors, UI, wake lock, racket face, teaching flow
+src/host/net.ts          host connection, players, clock sync, liveness
+src/host/phones.ts       phone seats by id, per-phone messages (pure)
+src/host/timeline.ts     pause intervals and match time (pure)
+src/host/game/*.ts       match rules, contact model, physics, solver, scoring, AI, render, audio, UI
 src/lab/*.ts             lab charts
 server/relay.ts          rooms and forwarding (pure logic + ws adapter)
 vite.config.ts           https, multi-page, relay on /ws, /api/lan
-tests/*.test.ts
+tests/**                 unit tests, replays of real phone recordings (tests/fixtures)
+docs/HANDOVER.md         where the work stands and what is next
 ```
 
 ## 8. Build phases
 
-1. **Sensor lab.** Relay, rooms, QR join, phone permission and sensors, swing
-   detector, clock sync, lab charts and CSV. *Done when:* tests pass, and on
-   Gustav's real phones swings show up in the lab with sensible power and spin.
-   Then tune `TUNING` from the recorded CSVs.
-2. **Game with keyboard.** Court, physics, solver, scoring, CPU, camera, sound;
-   Space swings (timing still decides aim). *Done when:* a full CPU match plays
-   to the end on keyboard, with screenshots at every screen.
-3. **Phones in the game.** Swing messages drive hits with lag compensation,
-   serving by toss and swing, the racket-face ripple, lobby and match end.
-4. **Polish and reach.** Point replay, doubles with humans, Versus, Practice
-   targets, Cloudflare deploy for play without shared Wi-Fi.
+1. **Sensor lab.** Done. Relay, rooms, QR join, phone permission and sensors,
+   swing detector, clock sync, lab charts and CSV, tuned on real recordings.
+2. **Game with keyboard.** Done. Court, physics, solver, scoring, CPU, camera,
+   sound; Space swings.
+3. **Phones in the game.** Done (co-op vs CPU, singles and doubles with up to
+   two phones). Lag compensation, toss-and-swing serves, racket-face ripple,
+   lobby, players bound to phone ids, disconnect and liveness handling. Then,
+   after Gustav played it: the racket contact model (section 5), the fixed
+   spin rule and the optional spin calibration (section 4).
+4. **Next** (see docs/HANDOVER.md for the order agreed so far): point replay,
+   Versus with split screen (Gustav said not yet), practice targets,
+   Cloudflare deploy for play without shared Wi-Fi.
