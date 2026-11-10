@@ -41,6 +41,13 @@ export interface LevelTuning {
   serveSpin: [number, number];
   /** Serve placement error, m, first and second serve. */
   serveSd: [number, number];
+  // Habits of a character (personalities.ts); absent or 0 for the plain level.
+  /** Chance of a short, sliced drop shot when the receiver stands deep. */
+  dropShot?: number;
+  /** Chance of aiming at the receiver's backhand instead of the open court. */
+  backhand?: number;
+  /** Mean of the serve timing: negative serves wide, positive down the T. */
+  serveBias?: number;
 }
 
 export const LEVELS: Record<Level, LevelTuning> = {
@@ -73,6 +80,9 @@ export const LEVELS: Record<Level, LevelTuning> = {
  */
 export const HUMAN = { speed: 5.5, reaction: 0.2, reach: 1.8 };
 
+/** A drop shot is only tried when the receiver stands at least this far behind the net, m. */
+export const DROP_FROM_DEPTH = 10.5;
+
 /** Comfortable contact height range, m. */
 export const CONTACT_LOW = 0.6;
 export const CONTACT_HIGH = 1.3;
@@ -91,6 +101,8 @@ export interface Mover {
   /** Doubles: the x range this player may stand in. */
   minX: number;
   maxX: number;
+  /** Swings with the left hand: forehand and backhand sides swap. */
+  leftHanded?: boolean;
 }
 
 export interface ContactPlan {
@@ -107,9 +119,9 @@ export interface ContactPlan {
 /** +1 on the near side (z > 0), -1 on the far side. */
 export const sideSign = (side: Side) => (side === 'near' ? 1 : -1);
 
-/** Right-handed: a near player faces -z so their right is +x; a far player's right is -x. */
-export function stanceFor(side: Side, playerX: number, ballX: number): 'forehand' | 'backhand' {
-  const lateral = (ballX - playerX) * sideSign(side);
+/** Right-handed: a near player faces -z so their right is +x; a far player's right is -x. Left-handed: mirrored. */
+export function stanceFor(side: Side, playerX: number, ballX: number, leftHanded = false): 'forehand' | 'backhand' {
+  const lateral = (ballX - playerX) * sideSign(side) * (leftHanded ? -1 : 1);
   return lateral >= 0 ? 'forehand' : 'backhand';
 }
 
@@ -184,7 +196,7 @@ export function planContact(
   const best = picked.plan;
   return {
     t: best.t, pos: best.pos, stand: best.stand, reachable: best.reachable,
-    stance: stanceFor(mover.side, best.stand.x, best.pos.x),
+    stance: stanceFor(mover.side, best.stand.x, best.pos.x, mover.leftHanded),
   };
 }
 
@@ -207,18 +219,32 @@ export const pressureFrom = (incomingKmh: number) => Math.max(0, Math.min(1.5, (
  * error. Pressure (a fast incoming ball) makes a botched shot more likely.
  */
 export function cpuShot(
-  level: Level, rng: Rng, hitter: Side, halfWidth: number, receiverX: number | null, pressure = 0,
+  level: Level | LevelTuning, rng: Rng, hitter: Side, halfWidth: number, receiverX: number | null, pressure = 0,
+  receiverDepth: number | null = null,
 ): ShotChoice {
-  const L = LEVELS[level];
+  const L = typeof level === 'string' ? LEVELS[level] : level;
   const toward = -sideSign(hitter);
+  // A character's drop shot: short, slow and sliced, played when the receiver stands deep. Habits draw random
+  // numbers only when the character has them, so the plain levels play exactly as before.
+  if (L.dropShot && receiverDepth !== null && receiverDepth > DROP_FROM_DEPTH && chance(rng, L.dropShot)) {
+    const away = receiverX !== null && Math.abs(receiverX) > 0.3 ? -Math.sign(receiverX) : (rng() < 0.5 ? -1 : 1);
+    const x = away * uniform(rng, 0.35, 0.7) * halfWidth + gauss(rng, L.aimSd * 0.6);
+    const depth = uniform(rng, 2.2, 3.6) + gauss(rng, L.depthSd * 0.5);
+    return {
+      target: vec(x, GROUND_Y, toward * Math.max(1.2, depth)), flight: uniform(rng, 1.15, 1.35),
+      spin: -uniform(rng, 0.5, 0.8), power: 0.2, intoNet: false,
+    };
+  }
   const attack = chance(rng, L.attack);
   const flightRange = attack ? L.attackFlight : L.flight;
   const aimRange = attack ? L.attackAim : L.aim;
   const flight = uniform(rng, flightRange[0], flightRange[1]);
   const spin = uniform(rng, L.spin[0], L.spin[1]);
   const power = Math.max(0, Math.min(1, (1.6 - flight) / 0.85));
-  const sign = receiverX !== null && Math.abs(receiverX) > 0.3 && (attack || chance(rng, L.openCourt))
+  let sign = receiverX !== null && Math.abs(receiverX) > 0.3 && (attack || chance(rng, L.openCourt))
     ? -Math.sign(receiverX) : (rng() < 0.5 ? -1 : 1);
+  // A character that works the backhand: the receiver's backhand (right-handed) is on the hitter's sideSign side of the court.
+  if (L.backhand && !attack && chance(rng, L.backhand)) sign = sideSign(hitter);
   let x = sign * uniform(rng, aimRange[0], aimRange[1]) * halfWidth + gauss(rng, L.aimSd);
   let depth = uniform(rng, L.depth[0], L.depth[1]) + gauss(rng, L.depthSd);
   if (chance(rng, L.mishit * (1 + pressure))) {
@@ -233,11 +259,11 @@ export function cpuShot(
 }
 
 /** CPU serve: timing (wide or T), power, spin and placement error for serve 1 or 2. */
-export function cpuServe(level: Level, rng: Rng, serveNumber: 1 | 2) {
-  const L = LEVELS[level];
+export function cpuServe(level: Level | LevelTuning, rng: Rng, serveNumber: 1 | 2) {
+  const L = typeof level === 'string' ? LEVELS[level] : level;
   const i = serveNumber - 1;
   return {
-    u: Math.max(-1, Math.min(1, gauss(rng, 0.45))),
+    u: Math.max(-1, Math.min(1, (L.serveBias ?? 0) + gauss(rng, 0.45))),
     power: L.servePower[i],
     spin: L.serveSpin[i],
     sd: L.serveSd[i],
@@ -245,4 +271,5 @@ export function cpuServe(level: Level, rng: Rng, serveNumber: 1 | 2) {
 }
 
 /** CPU contact timing error, ms. */
-export const cpuTimingNoise = (level: Level, rng: Rng) => gauss(rng, LEVELS[level].timingSd);
+export const cpuTimingNoise = (level: Level | LevelTuning, rng: Rng) =>
+  gauss(rng, (typeof level === 'string' ? LEVELS[level] : level).timingSd);

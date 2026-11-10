@@ -159,10 +159,17 @@ M5 to M7 follow the chosen design. M8 to M11 close the loop.
 
 ## 5. Delegation rules for this run
 
-- Haiku: read-only surveys. Sonnet: scoped coding with a runnable check, and
-  UI built from the approved design (at high). Opus at high: the relay, every
-  review of the relay and game logic, design direction. Opus at medium: other
-  reviews. `ui-reviewer`: every screen before it is called done.
+- As first written: Haiku for read-only surveys, Sonnet for scoped coding,
+  Opus for the relay, reviews and design direction.
+- **Changed by Gustav during the run (2026-11-10):** limit agents on other
+  models and prefer Fable over Opus and Sonnet; Haiku may continue. From then
+  on: the main Fable session does the work, with at most one Fable subagent
+  at a time for a bounded piece or an independent review, and Haiku for
+  read-only surveys. The Opus relay build already running finishes; Gustav
+  then allowed Fable to do security work on this project, so the relay audit
+  and its re-check are done by a fresh Fable subagent. The three Opus design
+  agents were cancelled a few minutes after launch; the mock-ups are made on
+  Fable. `ui-reviewer` still checks every screen before it is called done.
 - Every launch names its model, its files and its check, and tells the agent
   to do the work itself.
 - The laptop is shared: before any test run, check CPU and memory load; if it

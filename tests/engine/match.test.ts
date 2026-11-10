@@ -148,7 +148,7 @@ describe('match: hitting', () => {
     const tStar = toRallyIncoming(s);
     const before = s.log.length;
     const point = s.untilEvent('point');
-    expect(point).toEqual({ type: 'point', winner: 'far', reason: 'missed' });
+    expect(point).toMatchObject({ type: 'point', winner: 'far', reason: 'missed' });
     const when = s.log.slice(before).find((x) => x.e.type === 'point')!.now;
     expect(when).toBeGreaterThanOrEqual(tStar + ACCEPT * W + MISS_GRACE_MS);
     expect(when).toBeLessThan(tStar + ACCEPT * W + MISS_GRACE_MS + FRAME + 1e-6);
@@ -159,7 +159,7 @@ describe('match: hitting', () => {
   it('an unreturned serve is an ace', () => {
     const s = sim();
     toIncoming(s);
-    expect(s.untilEvent('point')).toEqual({ type: 'point', winner: 'far', reason: 'ace' });
+    expect(s.untilEvent('point')).toMatchObject({ type: 'point', winner: 'far', reason: 'ace' });
     expect(s.m.view().score.points).toEqual(['0', '15']);
   });
 
@@ -260,7 +260,7 @@ describe('match: serving', () => {
       }
     }
     const point = s.log.find((x) => x.e.type === 'point')!.e;
-    expect(point).toEqual({ type: 'point', winner: 'far', reason: 'double-fault' });
+    expect(point).toMatchObject({ type: 'point', winner: 'far', reason: 'double-fault' });
     expect(s.m.view().message).toBe('Double fault');
   });
 

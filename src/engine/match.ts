@@ -1,7 +1,8 @@
 import {
   HUMAN, LEVELS, cpuServe, cpuShot, cpuTimingNoise, planContact, pressureFrom, sideSign, stanceFor,
-  type ContactPlan, type Mover,
+  type ContactPlan, type LevelTuning, type Mover,
 } from './ai';
+import { characterOf, cpuTuning } from './personalities';
 import {
   GROUND_Y, buildPath, pathPosition, pathSpin, pathVelocity, speedKmh, vec, type BallPath,
 } from './physics';
@@ -12,8 +13,8 @@ import { createRng, gauss, type Rng } from './rng';
 import { awardPoint, createScore, other, scoreView, serveCourt, type ScoreState } from './scoring';
 import { launchVelocity, solveShot } from './solver';
 import {
-  COURT, type BallView, type HitWindow, type Match, type MatchConfig, type MatchEvent, type MatchView,
-  type Phase, type PlayerView, type Side, type SwingInput, type Vec3,
+  COURT, type BallView, type CpuStyle, type HitWindow, type Match, type MatchConfig, type MatchEvent, type MatchView,
+  type Phase, type PlayerStats, type PlayerView, type SeatConfig, type Side, type SwingInput, type Vec3,
 } from './types';
 
 /**
@@ -71,7 +72,7 @@ export interface GameMatch extends Match {
   expectedContact(player: number): number | null;
 }
 
-interface Player {
+export interface Player {
   id: number;
   side: Side;
   human: boolean;
@@ -83,11 +84,21 @@ interface Player {
   speed: number;
   reaction: number;
   reach: number;
+  leftHanded: boolean;
+  /** Humans: timing unit W and the acceptance half-width ACCEPT * W, ms. */
+  window: number;
+  accept: number;
+  /** CPUs: the character and the tuning it plays with; null for a human. */
+  style: CpuStyle | null;
+  cpu: LevelTuning | null;
+  /** A ball machine (drills). */
+  machine: boolean;
+  stats: PlayerStats;
   lastSwingAt: number | null;
   stanceHold: { stance: 'forehand' | 'backhand'; until: number } | null;
 }
 
-interface Ball {
+export interface Ball {
   kind: 'toss' | 'serve' | 'rally';
   path: BallPath;
   /** Host ms when the path starts. */
@@ -120,41 +131,34 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const wideSign = (aimX: number, bodySide: number) => (Math.abs(aimX) > 0.3 ? Math.sign(aimX) : Math.sign(bodySide) || 1);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-class RulesMatch implements GameMatch {
-  private readonly rng: Rng;
-  private readonly players: Player[];
-  /** Timing unit W, ms. */
-  private readonly window: number;
-  /** Acceptance half-width ACCEPT * W, ms. */
-  private readonly accept: number;
-  private readonly labels: [string, string];
-  private score: ScoreState;
-  private phase: Phase = 'serve-wait';
-  private clock = 0;
-  private started = false;
-  private ball: Ball | null = null;
-  private ballHidden = false;
-  private serveNumber: 1 | 2 = 1;
-  private serverIndex = 0;
-  private serveTurns: [number, number];
-  private rally = 0;
-  private message: string | null = null;
-  private winner: Side | null = null;
-  private readyAt: number | null = null;
+export class RulesMatch implements GameMatch {
+  protected readonly rng: Rng;
+  protected readonly players: Player[];
+  protected readonly labels: [string, string];
+  protected score: ScoreState;
+  protected phase: Phase = 'serve-wait';
+  protected clock = 0;
+  protected started = false;
+  protected ball: Ball | null = null;
+  protected ballHidden = false;
+  protected serveNumber: 1 | 2 = 1;
+  protected serverIndex = 0;
+  protected serveTurns: [number, number];
+  protected rally = 0;
+  protected message: string | null = null;
+  protected winner: Side | null = null;
+  protected readyAt: number | null = null;
   /** Host ms from which a swing may start the toss: when serve-wait became ready (swings dated earlier are stale). */
-  private serveReadyAt = -Infinity;
-  private cpuServeAt: number | null = null;
-  private phaseUntil: number | null = null;
-  private stats = { longestRally: 0, fastestShotKmh: 0 };
-  private pending: MatchEvent[] = [];
+  protected serveReadyAt = -Infinity;
+  protected cpuServeAt: number | null = null;
+  protected phaseUntil: number | null = null;
+  protected stats = { longestRally: 0, fastestShotKmh: 0, points: [0, 0] as [number, number] };
+  protected pending: MatchEvent[] = [];
 
-  constructor(private readonly config: MatchConfig, options: MatchOptions = {}) {
+  constructor(protected readonly config: MatchConfig, options: MatchOptions = {}) {
     this.rng = createRng(config.seed ?? Date.now());
-    this.window = HIT_WINDOW_MS[config.window];
-    this.accept = this.window * ACCEPT;
     this.players = makePlayers(config);
-    const humans = this.players.filter((p) => p.human).map((p) => p.name);
-    this.labels = [humans.join(' & '), 'CPU'];
+    this.labels = [sideLabel(this.players, 'near', !config.seats), sideLabel(this.players, 'far', !config.seats)];
     const first = options.firstServer ?? 'far';
     this.score = createScore(config.length, first);
     this.serveTurns = first === 'near' ? [0, -1] : [-1, 0];
@@ -187,6 +191,9 @@ class RulesMatch implements GameMatch {
     if (!Number.isFinite(input.t) || !Number.isFinite(input.power) || !Number.isFinite(input.spin)) return;
     const swing = { ...input, power: clamp(input.power, 0, 1), spin: clamp(input.spin, -1, 1) };
     p.lastSwingAt = swing.t;
+    if (typeof input.omega === 'number' && Number.isFinite(input.omega)) {
+      p.stats.fastestSwing = Math.max(p.stats.fastestSwing, input.omega);
+    }
     const ball = this.ball;
     if (this.phase === 'serve-wait' && this.serverIndex === p.id) {
       if (swing.t >= this.serveReadyAt) this.toss(p, swing.t);
@@ -211,12 +218,9 @@ class RulesMatch implements GameMatch {
       const tStar = ball.t0 + ball.plan.t * 1000;
       // A swing can never strike the ball before its first bounce, nor once it has bounced twice (dead).
       if (swing.t < this.firstBounceAt(ball) || swing.t >= this.secondBounceAt(ball)) return;
-      if (Math.abs(swing.t - tStar) > this.accept || this.clock > tStar + this.accept + MISS_GRACE_MS) return;
+      if (Math.abs(swing.t - tStar) > p.accept || this.clock > tStar + p.accept + MISS_GRACE_MS) return;
       if (ball.plan.reachable) this.humanStrike(ball, p, swing);
-      else if (!ball.whiffed) {
-        ball.whiffed = true;
-        this.emit({ type: 'whiff', player: p.id });
-      }
+      else this.whiff(ball, p);
       return;
     }
     // Already returned: a stronger swing inside the same window replaces the shot (a stronger whiff changes nothing).
@@ -224,20 +228,20 @@ class RulesMatch implements GameMatch {
     if (ball.hitter === p.id && source?.plan && source.receiver === p.id && ball.cursor === 0
       && swing.power > ball.power) {
       const tStar = source.t0 + source.plan.t * 1000;
-      if (swing.t >= this.firstBounceAt(source) && swing.t < this.secondBounceAt(source) && Math.abs(swing.t - tStar) <= this.accept) {
+      if (swing.t >= this.firstBounceAt(source) && swing.t < this.secondBounceAt(source) && Math.abs(swing.t - tStar) <= p.accept) {
         this.humanStrike(source, p, swing, true);
       }
     }
   }
 
   /** Host ms of the ball's first bounce (-Infinity when it has none). */
-  private firstBounceAt(ball: Ball): number {
+  protected firstBounceAt(ball: Ball): number {
     const first = ball.path.events.find((e) => e.kind === 'bounce' && e.index === 1);
     return first ? ball.t0 + first.t * 1000 : -Infinity;
   }
 
   /** Host ms of the ball's second bounce: from then on it is dead and no swing can touch it (Infinity when it has none). */
-  private secondBounceAt(ball: Ball): number {
+  protected secondBounceAt(ball: Ball): number {
     const second = ball.path.events.find((e) => e.kind === 'bounce' && e.index === 2);
     return second ? ball.t0 + second.t * 1000 : Infinity;
   }
@@ -256,6 +260,7 @@ class RulesMatch implements GameMatch {
     const players: PlayerView[] = this.players.map((p) => ({
       id: p.id, side: p.side, human: p.human, name: p.name, color: p.color,
       pos: { ...p.pos }, stance: this.stanceOf(p), lastSwingAt: p.lastSwingAt, receiving: receiver === p.id,
+      half: p.half, leftHanded: p.leftHanded, style: p.style, machine: p.machine,
     }));
     return {
       phase: this.phase,
@@ -267,13 +272,17 @@ class RulesMatch implements GameMatch {
       serveNumber: this.serveNumber,
       message: this.message,
       winner: this.winner,
-      stats: { ...this.stats },
+      stats: {
+        longestRally: this.stats.longestRally, fastestShotKmh: this.stats.fastestShotKmh,
+        players: this.players.map((p) => ({ ...p.stats })), points: [this.stats.points[0], this.stats.points[1]],
+      },
+      labels: [this.labels[0], this.labels[1]],
     };
   }
 
   // ---- scheduling ----
 
-  private nextDue(): { t: number; run: () => void } | null {
+  protected nextDue(): { t: number; run: () => void } | null {
     const options: { t: number; run: () => void }[] = [];
     const ball = this.ball;
     if (ball) {
@@ -290,13 +299,21 @@ class RulesMatch implements GameMatch {
     return options.reduce((a, b) => (b.t < a.t ? b : a));
   }
 
-  private emit(event: MatchEvent) {
+  protected emit(event: MatchEvent) {
     this.pending.push(event);
+  }
+
+  /** A clean miss by a swing: announced once per ball; the ball stays in play. */
+  protected whiff(ball: Ball, p: Player) {
+    if (ball.whiffed) return;
+    ball.whiffed = true;
+    p.stats.whiffs++;
+    this.emit({ type: 'whiff', player: p.id });
   }
 
   // ---- points ----
 
-  private startPoint() {
+  protected startPoint() {
     this.phase = 'serve-wait';
     this.serveNumber = 1;
     this.rally = 0;
@@ -314,10 +331,26 @@ class RulesMatch implements GameMatch {
     this.cpuServeAt = server.human ? null : this.clock + CPU_SERVE_DELAY_MS;
   }
 
-  private point(winner: Side, reason: Extract<MatchEvent, { type: 'point' }>['reason']) {
+  protected point(winner: Side, reason: Extract<MatchEvent, { type: 'point' }>['reason']) {
     if (this.phase === 'point-over' || this.phase === 'match-over') return;
-    if (this.ball) this.killBall(this.ball);
-    this.emit({ type: 'point', winner, reason });
+    const last = this.ball;
+    // Whose last touch decided it: the winner's shot for a winner or an ace, otherwise the player who erred.
+    const by = reason === 'double-fault' ? this.serverIndex
+      : reason === 'missed' ? last?.receiver ?? null
+        : last?.hitter ?? null;
+    if (last) this.killBall(last);
+    if (by !== null) {
+      const st = this.players[by].stats;
+      if (reason === 'winner' || reason === 'ace') {
+        st.winners++;
+        if (reason === 'ace') st.aces++;
+      } else {
+        st.errors++;
+        if (reason === 'double-fault') st.doubleFaults++;
+      }
+    }
+    this.stats.points[winner === 'near' ? 0 : 1]++;
+    this.emit({ type: 'point', winner, reason, by, rally: this.rally });
     this.stats.longestRally = Math.max(this.stats.longestRally, this.rally);
     const result = awardPoint(this.score, winner);
     this.score = result.state;
@@ -342,7 +375,7 @@ class RulesMatch implements GameMatch {
   }
 
   /** Move the serve to the next player when the scoring hands it to the other side. */
-  private syncServer() {
+  protected syncServer() {
     const side = this.score.server;
     if (this.players[this.serverIndex].side === side) return;
     const i = side === 'near' ? 0 : 1;
@@ -351,19 +384,19 @@ class RulesMatch implements GameMatch {
     this.serverIndex = team[this.serveTurns[i] % team.length].id;
   }
 
-  private onPhaseEnd() {
+  protected onPhaseEnd() {
     this.phaseUntil = null;
     if (this.phase === 'match-over') this.ballHidden = true;
     else if (this.phase === 'point-over') this.startPoint();
   }
 
-  private onReady() {
+  protected onReady() {
     this.readyAt = null;
     this.message = null;
     if (this.phase === 'serve-wait') this.ball = null;
   }
 
-  private killBall(ball: Ball) {
+  protected killBall(ball: Ball) {
     ball.dead = true;
     ball.cpuHitAt = null;
     ball.missAt = null;
@@ -372,7 +405,7 @@ class RulesMatch implements GameMatch {
 
   // ---- serving ----
 
-  private toss(server: Player, t: number) {
+  protected toss(server: Player, t: number) {
     this.readyAt = null;
     this.cpuServeAt = null;
     this.message = null;
@@ -383,7 +416,7 @@ class RulesMatch implements GameMatch {
     ball.receiver = null;
     if (server.human) ball.tossExpire = t + TOSS.hitUntilMs + MISS_GRACE_MS;
     else {
-      const timing = gauss(this.rng, LEVELS[this.config.level].timingSd);
+      const timing = gauss(this.rng, server.cpu!.timingSd);
       ball.cpuHitAt = t + TOSS_APEX_MS + timing;
     }
     this.ball = ball;
@@ -391,7 +424,7 @@ class RulesMatch implements GameMatch {
     this.emit({ type: 'toss', player: server.id });
   }
 
-  private onTossExpire(ball: Ball) {
+  protected onTossExpire(ball: Ball) {
     // An unhit toss is caught and tossed again: no fault.
     ball.tossExpire = null;
     if (this.ball !== ball || this.phase !== 'toss') return;
@@ -400,7 +433,7 @@ class RulesMatch implements GameMatch {
     this.ball = null;
   }
 
-  private onCpuServe() {
+  protected onCpuServe() {
     this.cpuServeAt = null;
     if (this.phase !== 'serve-wait') return;
     this.toss(this.players[this.serverIndex], this.clock);
@@ -412,22 +445,19 @@ class RulesMatch implements GameMatch {
    * swing in the toss window); it is only replaced if the new swing touches the
    * ball. A human whiff leaves the toss falling. Returns false on a whiff.
    */
-  private serve(
+  protected serve(
     toss: Ball, t: number, power: number, spin: number, cpu: { u: number; sd: number } | null, replacing: Ball | null,
   ): boolean {
     const server = this.players[toss.hitter];
     const contact = pathPosition(toss.path, (t - toss.t0) / 1000);
     const timing = (t - (toss.t0 + TOSS_APEX_MS)) / SERVE_TIMING_MS;
     const u = cpu ? cpu.u : clamp(timing, -1, 1);
-    const faceSd = cpu ? LEVELS[this.config.level].faceSd : 0;
+    const faceSd = cpu ? server.cpu?.faceSd ?? 0 : 0;
     let c = locateServeContact(timing, TOSS_APEX_Y - contact.y, faceSd, this.rng);
     const low = contact.y < SERVE_MIN_HEIGHT;
     if (c.kind === 'miss') {
       if (server.human && !low) {
-        if (!replacing && !toss.whiffed) {
-          toss.whiffed = true;
-          this.emit({ type: 'whiff', player: server.id });
-        }
+        if (!replacing) this.whiff(toss, server);
         return false;
       }
       // A CPU never whiffs its serve, and a ball struck too low goes into the net regardless.
@@ -468,11 +498,11 @@ class RulesMatch implements GameMatch {
     this.rally = 1;
     this.ball = ball;
     this.assignReceiver(ball, this.serveReceiver());
-    this.recordHit(server, t, c, power, spin, u, v0);
+    this.recordHit(server, t, c, power, spin, u, v0, 'serve');
     return true;
   }
 
-  private fault() {
+  protected fault() {
     const ball = this.ball;
     if (ball) this.killBall(ball);
     this.emit({ type: 'fault', serveNumber: this.serveNumber });
@@ -492,7 +522,7 @@ class RulesMatch implements GameMatch {
 
   // ---- rally ----
 
-  private onBallEvent(ball: Ball) {
+  protected onBallEvent(ball: Ball) {
     const event = ball.path.events[ball.cursor++];
     if (ball.kind === 'toss') return;
     if (ball.dead || this.phase !== 'rally' || ball !== this.ball) {
@@ -521,12 +551,12 @@ class RulesMatch implements GameMatch {
     this.emit({ type: 'bounce', pos: event.pos, in: this.inCourt(event.pos, receiverSide) });
   }
 
-  private onCpuHit(ball: Ball) {
+  protected onCpuHit(ball: Ball) {
     ball.cpuHitAt = null;
     if (ball !== this.ball || ball.dead) return;
     if (ball.kind === 'toss') {
       if (this.phase !== 'toss') return;
-      const plan = cpuServe(this.config.level, this.rng, this.serveNumber);
+      const plan = cpuServe(this.players[ball.hitter].cpu ?? this.config.level, this.rng, this.serveNumber);
       this.serve(ball, this.clock, plan.power, plan.spin, { u: plan.u, sd: plan.sd }, null);
       return;
     }
@@ -540,18 +570,19 @@ class RulesMatch implements GameMatch {
     const halfWidth = this.halfWidth();
     const opponents = this.sidePlayers(other(p.side));
     const receiverX = opponents.length === 1 ? opponents[0].pos.x : null;
+    const receiverDepth = opponents.length === 1 ? Math.abs(opponents[0].pos.z) : null;
     const incoming = speedKmh(pathVelocity(ball.path, 0));
-    const choice = cpuShot(this.config.level, this.rng, p.side, halfWidth, receiverX, pressureFrom(incoming));
+    const tuning = p.cpu ?? LEVELS[this.config.level];
+    const choice = cpuShot(tuning, this.rng, p.side, halfWidth, receiverX, pressureFrom(incoming), receiverDepth);
     const p0 = this.contactFrom(ball, this.clock, p.side);
     // The same contact model as a human, with the level's own placement error.
     const c = locateContact({
       u, spin: choice.spin, height: p0.y, rushed: ball.rushed, lateral: Math.abs(p0.x - p.pos.x),
-      extraNoise: LEVELS[this.config.level].faceSd,
+      extraNoise: tuning.faceSd,
     }, this.rng);
     if (c.kind === 'miss') {
       // A clean miss: the ball runs on and the point is lost when it dies.
-      ball.whiffed = true;
-      this.emit({ type: 'whiff', player: p.id });
+      this.whiff(ball, p);
       return;
     }
     let v0: Vec3;
@@ -569,7 +600,7 @@ class RulesMatch implements GameMatch {
     this.launchRally(ball, p, this.clock, v0, p0, choice.spin, choice.power, c, u, false);
   }
 
-  private onMiss(ball: Ball) {
+  protected onMiss(ball: Ball) {
     ball.missAt = null;
     if (ball !== this.ball || ball.dead || this.phase !== 'rally') return;
     const winner = this.players[ball.hitter].side;
@@ -582,18 +613,15 @@ class RulesMatch implements GameMatch {
    * is aim, and timing, spin and the situation decide where the ball meets the
    * face. A contact beyond the frame is a whiff: the ball stays in play.
    */
-  private humanStrike(ball: Ball, p: Player, swing: SwingInput, upgrade = false): boolean {
+  protected humanStrike(ball: Ball, p: Player, swing: SwingInput, upgrade = false): boolean {
     const tStar = ball.t0 + (ball.plan?.t ?? 0) * 1000;
-    const u = (swing.t - tStar) / this.window;
+    const u = (swing.t - tStar) / p.window;
     const p0 = this.contactFrom(ball, swing.t, p.side);
     const c = locateContact({
       u, spin: swing.spin, height: p0.y, rushed: ball.rushed, lateral: Math.abs(p0.x - p.pos.x),
     }, this.rng);
     if (c.kind === 'miss') {
-      if (!upgrade && !ball.whiffed) {
-        ball.whiffed = true;
-        this.emit({ type: 'whiff', player: p.id });
-      }
+      if (!upgrade) this.whiff(ball, p);
       return false;
     }
     const halfWidth = this.halfWidth();
@@ -615,13 +643,13 @@ class RulesMatch implements GameMatch {
   }
 
   /** A frame hit: weak, in any direction, often into the net (contact.ts shank). */
-  private shankVelocity(p0: Vec3, side: Side, spin: number, halfWidth: number): Vec3 {
+  protected shankVelocity(p0: Vec3, side: Side, spin: number, halfWidth: number): Vec3 {
     const sh = shank(this.rng, halfWidth);
     if (sh.intoNet) return launchVelocity(p0, vec(sh.x * 0.5, sh.netY, 0), sh.netFlight, spin);
     return solveShot(p0, vec(sh.x, GROUND_Y, -sideSign(side) * sh.depth), sh.flight, spin).v0;
   }
 
-  private launchRally(
+  protected launchRally(
     from: Ball, p: Player, t: number, v0: Vec3, p0: Vec3, spin: number, power: number,
     contact: Contact, u: number, upgrade: boolean,
   ) {
@@ -632,37 +660,44 @@ class RulesMatch implements GameMatch {
     this.ball = ball;
     if (!upgrade) this.rally++;
     this.assignReceiver(ball, this.rallyReceiver(other(p.side), path));
-    this.recordHit(p, t, contact, power, spin, u, v0);
+    this.recordHit(p, t, contact, power, spin, u, v0, null);
   }
 
-  private recordHit(p: Player, t: number, c: Contact, power: number, spin: number, u: number, v0: Vec3) {
+  protected recordHit(
+    p: Player, t: number, c: Contact, power: number, spin: number, u: number, v0: Vec3, stroke: 'serve' | null,
+  ) {
     const kmh = Math.round(speedKmh(v0));
     p.lastSwingAt = t;
     const ballX = this.ball ? this.ball.path.segments[0].p0.x : p.pos.x;
-    p.stanceHold = { stance: stanceFor(p.side, p.pos.x, ballX), until: this.clock + STANCE_HOLD_MS };
+    const stance = stanceFor(p.side, p.pos.x, ballX, p.leftHanded);
+    p.stanceHold = { stance, until: this.clock + STANCE_HOLD_MS };
     if (p.human) this.stats.fastestShotKmh = Math.max(this.stats.fastestShotKmh, kmh);
     this.stats.longestRally = Math.max(this.stats.longestRally, this.rally);
+    p.stats.hits++;
+    if (c.kind === 'frame') p.stats.frames++;
+    else if (c.quality >= 0.7) p.stats.sweet++;
+    p.stats.fastestShotKmh = Math.max(p.stats.fastestShotKmh, kmh);
     this.emit({
       type: 'hit', player: p.id, quality: c.quality, power, spin, u, speedKmh: kmh,
-      contact: { a: c.a, b: c.b, frame: c.kind === 'frame' },
+      contact: { a: c.a, b: c.b, frame: c.kind === 'frame' }, t, stroke: stroke ?? stance,
     });
   }
 
   /** Ball position at host time t from the ball's history, kept on the hitter's side of the net. */
-  private contactFrom(ball: Ball, t: number, side: Side): Vec3 {
+  protected contactFrom(ball: Ball, t: number, side: Side): Vec3 {
     const pos = pathPosition(ball.path, (t - ball.t0) / 1000);
     const s = sideSign(side);
     return vec(pos.x, Math.max(pos.y, GROUND_Y + 0.05), s * Math.max(pos.z * s, 0.5));
   }
 
-  private assignReceiver(ball: Ball, receiver: number | null) {
+  protected assignReceiver(ball: Ball, receiver: number | null) {
     ball.receiver = receiver;
     if (receiver === null) return;
     const p = this.players[receiver];
     const now = (this.clock - ball.t0) / 1000;
     // A human's acceptance window spans T* +- ACCEPT * W: keep T* at least that long after the first bounce and
     // before the second (when the ball leaves room), so the window never opens on a ball not yet bounced or closes on a dead one.
-    const room = p.human ? this.accept / 1000 : undefined;
+    const room = p.human ? p.accept / 1000 : undefined;
     ball.plan = planContact(ball.path, now, this.mover(p), room, room);
     ball.moveFrom = this.clock + p.reaction * 1000;
     if (ball.plan) {
@@ -674,16 +709,16 @@ class RulesMatch implements GameMatch {
     const deadAt = ball.t0 + (second ? second.t : (last?.t ?? 0) + 1) * 1000;
     if (p.human) {
       // The window closes at the second bounce at the latest: a dead ball cannot be struck (late messages still count for MISS_GRACE_MS).
-      ball.missAt = ball.plan ? Math.min(ball.t0 + ball.plan.t * 1000 + this.accept, deadAt) + MISS_GRACE_MS : deadAt;
+      ball.missAt = ball.plan ? Math.min(ball.t0 + ball.plan.t * 1000 + p.accept, deadAt) + MISS_GRACE_MS : deadAt;
     } else {
       ball.missAt = deadAt;
       if (ball.plan?.reachable) {
-        ball.cpuHitAt = ball.t0 + ball.plan.t * 1000 + cpuTimingNoise(this.config.level, this.rng);
+        ball.cpuHitAt = ball.t0 + ball.plan.t * 1000 + cpuTimingNoise(p.cpu ?? this.config.level, this.rng);
       }
     }
   }
 
-  private newBall(kind: Ball['kind'], path: BallPath, t0: number, hitter: number, power: number): Ball {
+  protected newBall(kind: Ball['kind'], path: BallPath, t0: number, hitter: number, power: number): Ball {
     return {
       kind, path, t0, cursor: 0, hitter, receiver: null, plan: null, boxSign: 0, source: null, power,
       cpuHitAt: null, missAt: null, tossExpire: null, moveFrom: t0, rushed: 0, whiffed: false, dead: false,
@@ -692,24 +727,24 @@ class RulesMatch implements GameMatch {
 
   // ---- players ----
 
-  private sidePlayers(side: Side): Player[] {
+  protected sidePlayers(side: Side): Player[] {
     return this.players.filter((p) => p.side === side);
   }
 
-  private halfWidth() {
+  protected halfWidth() {
     return this.config.mode === 'doubles' ? COURT.doublesHalfWidth : COURT.singlesHalfWidth;
   }
 
-  private mover(p: Player): Mover {
+  protected mover(p: Player): Mover {
     const wide = COURT.doublesHalfWidth + 3;
     return {
-      pos: p.pos, side: p.side, speed: p.speed, reaction: p.reaction, reach: p.reach,
+      pos: p.pos, side: p.side, speed: p.speed, reaction: p.reaction, reach: p.reach, leftHanded: p.leftHanded,
       minX: p.half === 1 ? -1 : -wide, maxX: p.half === -1 ? 1 : wide,
     };
   }
 
   /** The receiver of a rally ball: in doubles, whoever covers the half it lands in. */
-  private rallyReceiver(side: Side, path: BallPath): number | null {
+  protected rallyReceiver(side: Side, path: BallPath): number | null {
     if (path.events.some((e) => e.kind === 'net')) return null;
     const team = this.sidePlayers(side);
     if (team.length === 1) return team[0].id;
@@ -718,7 +753,7 @@ class RulesMatch implements GameMatch {
     return (team.find((p) => p.half === (x < 0 ? -1 : 1)) ?? team[0]).id;
   }
 
-  private serveReceiver(): number {
+  protected serveReceiver(): number {
     const side = other(this.score.server);
     const team = this.sidePlayers(side);
     if (team.length === 1) return team[0].id;
@@ -726,14 +761,14 @@ class RulesMatch implements GameMatch {
     return (team.find((p) => p.half === sign) ?? team[0]).id;
   }
 
-  private receivingPlayer(): number | null {
+  protected receivingPlayer(): number | null {
     if (this.phase === 'serve-wait' || this.phase === 'toss') return this.serveReceiver();
     if (this.phase === 'rally' && this.ball && !this.ball.dead) return this.ball.receiver;
     return null;
   }
 
   /** Where each player stands for the next serve. */
-  private servePosition(p: Player): Vec3 {
+  protected servePosition(p: Player): Vec3 {
     const s = sideSign(p.side);
     const court = serveCourt(this.score) === 'deuce' ? 1 : -1;
     if (p.id === this.serverIndex) return vec(s * court * 0.7, 0, s * (COURT.halfLength + 0.4));
@@ -741,12 +776,12 @@ class RulesMatch implements GameMatch {
     return this.home(p);
   }
 
-  private home(p: Player): Vec3 {
+  protected home(p: Player): Vec3 {
     const s = sideSign(p.side);
     return p.half === 0 ? vec(0, 0, s * 12.6) : vec(p.half * 2.6, 0, s * 12.4);
   }
 
-  private target(p: Player): Vec3 {
+  protected target(p: Player): Vec3 {
     if (this.phase === 'point-over') return this.servePosition(p);
     if (this.phase !== 'rally') return p.pos;
     const ball = this.ball;
@@ -755,7 +790,7 @@ class RulesMatch implements GameMatch {
   }
 
   /** Run every player toward their target from the current clock to time `to`. */
-  private advancePlayers(to: number) {
+  protected advancePlayers(to: number) {
     if (to <= this.clock) return;
     const ball = this.ball;
     for (const p of this.players) {
@@ -774,12 +809,12 @@ class RulesMatch implements GameMatch {
     this.clock = to;
   }
 
-  private stanceOf(p: Player): PlayerView['stance'] {
+  protected stanceOf(p: Player): PlayerView['stance'] {
     if ((this.phase === 'serve-wait' || this.phase === 'toss') && p.id === this.serverIndex) return 'serve';
     if (p.stanceHold && this.clock < p.stanceHold.until) return p.stanceHold.stance;
     const ball = this.ball;
     if (this.phase === 'rally' && ball && !ball.dead && ball.receiver === p.id && ball.plan) {
-      return stanceFor(p.side, p.pos.x, ball.plan.pos.x);
+      return stanceFor(p.side, p.pos.x, ball.plan.pos.x, p.leftHanded);
     }
     return 'ready';
   }
@@ -787,18 +822,18 @@ class RulesMatch implements GameMatch {
   // ---- court ----
 
   /** Inside the court lines on `side` (either side when null). */
-  private inCourt(pos: Vec3, side: Side | null): boolean {
+  protected inCourt(pos: Vec3, side: Side | null): boolean {
     if (side && pos.z * sideSign(side) < 0) return false;
     return Math.abs(pos.z) <= COURT.halfLength + LINE && Math.abs(pos.x) <= this.halfWidth() + LINE;
   }
 
-  private inServiceBox(pos: Vec3, side: Side, boxSign: number): boolean {
+  protected inServiceBox(pos: Vec3, side: Side, boxSign: number): boolean {
     const depth = pos.z * sideSign(side);
     return depth > 0 && depth <= COURT.serviceLine + LINE
       && pos.x * boxSign >= -LINE && Math.abs(pos.x) <= COURT.singlesHalfWidth + LINE;
   }
 
-  private ballView(ball: Ball | null): BallView {
+  protected ballView(ball: Ball | null): BallView {
     if (!ball) {
       const server = this.players[this.serverIndex];
       const s = sideSign(server.side);
@@ -826,31 +861,67 @@ const REASON_MESSAGE: Record<Extract<MatchEvent, { type: 'point' }>['reason'], s
   winner: 'Winner', out: 'Out', net: 'Net', 'double-fault': 'Double fault', missed: 'Missed', ace: 'Ace',
 };
 
-function makePlayers(config: MatchConfig): Player[] {
-  const humans = config.mode === 'singles' ? 1 : config.humans;
-  const cpu = LEVELS[config.level];
-  const players: Player[] = [];
-  const add = (side: Side, half: -1 | 0 | 1, human: boolean, name: string, color: string) => {
-    const id = players.length;
-    players.push({
-      id, side, human, name, color, half, pos: vec(0, 0, sideSign(side) * 12.6),
-      speed: human ? HUMAN.speed : cpu.speed, reaction: human ? HUMAN.reaction : cpu.reaction,
-      reach: human ? HUMAN.reach : cpu.reach, lastSwingAt: null, stanceHold: null,
-    });
-  };
-  const humanName = (i: number) => config.names?.[i] || `Player ${i + 1}`;
-  const humanColor = (i: number) => config.colors?.[i] || HUMAN_COLORS[i % HUMAN_COLORS.length];
-  if (config.mode === 'singles') {
-    add('near', 0, true, humanName(0), humanColor(0));
-    add('far', 0, false, 'CPU', CPU_COLORS[1]);
-  } else {
-    add('near', -1, true, humanName(0), humanColor(0));
-    if (humans === 2) add('near', 1, true, humanName(1), humanColor(1));
-    else add('near', 1, false, 'Partner', CPU_COLORS[0]);
-    add('far', -1, false, 'CPU 1', CPU_COLORS[1]);
-    add('far', 1, false, 'CPU 2', CPU_COLORS[2]);
+const emptyStats = (): PlayerStats => ({
+  hits: 0, sweet: 0, frames: 0, whiffs: 0, winners: 0, aces: 0, errors: 0, doubleFaults: 0, fastestShotKmh: 0, fastestSwing: 0,
+});
+
+/** The v1 config shape as seats: `humans` humans on the near side against plain CPUs. */
+function legacySeats(config: MatchConfig): SeatConfig[] {
+  const humans = config.mode === 'singles' ? 1 : config.humans ?? 1;
+  const human = (i: number): SeatConfig => ({ side: 'near', human: true, name: config.names?.[i], color: config.colors?.[i] });
+  if (config.mode === 'singles') return [human(0), { side: 'far', human: false, name: 'CPU' }];
+  return [
+    human(0),
+    humans === 2 ? human(1) : { side: 'near', human: false, name: 'Partner' },
+    { side: 'far', human: false, name: 'CPU 1' },
+    { side: 'far', human: false, name: 'CPU 2' },
+  ];
+}
+
+/**
+ * The match's players from its seats: near side first, then far; in doubles
+ * the first seat of a side covers x < 0. Player ids are indexes in this order.
+ */
+export function makePlayers(config: MatchConfig): Player[] {
+  const seats = config.seats ?? legacySeats(config);
+  const perSide = config.mode === 'singles' ? 1 : 2;
+  const ordered = [...seats.filter((s) => s.side === 'near'), ...seats.filter((s) => s.side === 'far')];
+  if (ordered.length !== perSide * 2 || ordered.filter((s) => s.side === 'near').length !== perSide) {
+    throw new Error(`a ${config.mode} match needs ${perSide} player${perSide > 1 ? 's' : ''} on each side`);
   }
-  return players;
+  let humans = 0;
+  let farCpus = 0;
+  return ordered.map((seat, id) => {
+    const half: -1 | 0 | 1 = perSide === 1 ? 0 : id % 2 === 0 ? -1 : 1;
+    const style: CpuStyle | null = seat.human ? null : seat.style ?? 'allround';
+    const cpu = style ? cpuTuning(style, seat.level ?? config.level) : null;
+    const window = HIT_WINDOW_MS[seat.window ?? config.window];
+    let name: string;
+    let color: string;
+    if (seat.human) {
+      name = seat.name || `Player ${humans + 1}`;
+      color = seat.color || HUMAN_COLORS[humans % HUMAN_COLORS.length];
+      humans++;
+    } else {
+      name = seat.name || characterOf(style!).name;
+      color = seat.color || (seat.side === 'near' ? CPU_COLORS[0] : CPU_COLORS[1 + (farCpus++ % 2)]);
+    }
+    return {
+      id, side: seat.side, human: seat.human, name, color, half, pos: vec(0, 0, sideSign(seat.side) * 12.6),
+      speed: cpu ? cpu.speed : HUMAN.speed, reaction: cpu ? cpu.reaction : HUMAN.reaction,
+      reach: cpu ? cpu.reach : HUMAN.reach, leftHanded: seat.human && seat.leftHanded === true,
+      window, accept: window * ACCEPT, style, cpu, machine: false, stats: emptyStats(),
+      lastSwingAt: null, stanceHold: null,
+    };
+  });
+}
+
+/** A side's name on the score: its humans, or its CPUs when it has none ("CPU" for the v1 config shape). */
+function sideLabel(players: Player[], side: Side, legacy: boolean): string {
+  const team = players.filter((p) => p.side === side);
+  const humans = team.filter((p) => p.human).map((p) => p.name);
+  if (humans.length) return humans.join(' & ');
+  return legacy ? 'CPU' : [...new Set(team.map((p) => p.name))].join(' & ');
 }
 
 /**

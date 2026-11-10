@@ -11,8 +11,16 @@ every milestone.
   busy, do other work and retry later. Subagents get the same rule.
 - Port 5280 is ours (a Vite dev server for this folder was already running at
   the start, PID 15364 then). Never touch 5173.
-- Subagents: foreground `Agent` calls, `model` set, tagged description, files
-  named, "Do not spawn any subagents. Do all of this work yourself, directly."
+- **Model routing, changed by Gustav on 2026-11-10 during the run:** limit
+  agents on other models; prefer Fable over Opus and Sonnet; Haiku is fine for
+  read-only legwork. So: do the work in the main Fable session, or in one
+  Fable subagent at a time (`model: "fable"`). No Sonnet agents. The Opus
+  relay build that was already running is allowed to finish; after it, Gustav
+  said Fable may do security work on this project too, so the relay audit and
+  re-check go to a fresh Fable subagent. No new Opus agents.
+- Subagents: `model` set, tagged description, files named, "Do not spawn any
+  subagents. Do all of this work yourself, directly." Background agents go
+  through `delegate_task`; foreground ones through `Agent`.
 
 ## State
 

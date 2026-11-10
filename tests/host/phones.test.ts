@@ -75,8 +75,8 @@ describe('messages to phones', () => {
 
   it('turns a human hit into a hit for that phone only, carrying where the ball met the face', () => {
     const out = eventMessages([
-      { type: 'hit', player: 1, quality: 0.8, power: 0.7, spin: -0.5, u: 0.2, speedKmh: 90, contact: { a: 0.62, b: -0.3, frame: false } },
-      { type: 'hit', player: 2, quality: 1, power: 1, spin: 0, u: 0, speedKmh: 90, contact: { a: -0.15, b: 0, frame: false } },
+      { type: 'hit', player: 1, quality: 0.8, power: 0.7, spin: -0.5, u: 0.2, speedKmh: 90, contact: { a: 0.62, b: -0.3, frame: false }, t: 0, stroke: 'forehand' },
+      { type: 'hit', player: 2, quality: 1, power: 1, spin: 0, u: 0, speedKmh: 90, contact: { a: -0.15, b: 0, frame: false }, t: 0, stroke: 'forehand' },
     ], a, null);
     // u = a (along the racket), v = b (across it): the real contact, not timing and spin.
     expect(out).toEqual([{ t: 'hit', to: 3, quality: 0.8, u: 0.62, v: -0.3, frame: false }]);
@@ -84,8 +84,8 @@ describe('messages to phones', () => {
 
   it('marks a frame hit and keeps its point on the frame, clamping wild values', () => {
     const out = eventMessages([
-      { type: 'hit', player: 0, quality: 0.05, power: 0.7, spin: 0, u: 1.3, speedKmh: 30, contact: { a: -1.1, b: 0.2, frame: true } },
-      { type: 'hit', player: 0, quality: 0.05, power: 0.7, spin: 0, u: 1.3, speedKmh: 30, contact: { a: 9, b: Number.NaN, frame: true } },
+      { type: 'hit', player: 0, quality: 0.05, power: 0.7, spin: 0, u: 1.3, speedKmh: 30, contact: { a: -1.1, b: 0.2, frame: true }, t: 0, stroke: 'forehand' },
+      { type: 'hit', player: 0, quality: 0.05, power: 0.7, spin: 0, u: 1.3, speedKmh: 30, contact: { a: 9, b: Number.NaN, frame: true }, t: 0, stroke: 'forehand' },
     ], a, null);
     expect(out).toEqual([
       { t: 'hit', to: 1, quality: 0.05, u: -1.1, v: 0.2, frame: true },
@@ -94,17 +94,17 @@ describe('messages to phones', () => {
   });
 
   it('sends miss for a missed point and for an ace, once, to the receiver', () => {
-    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'missed' }], a, 1)).toEqual([{ t: 'miss', to: 3 }]);
+    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'missed', by: null, rally: 0 }], a, 1)).toEqual([{ t: 'miss', to: 3 }]);
     // An unreturned serve is the receiver's miss too; a human's own ace sends nothing.
-    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'ace' }], a, 0)).toEqual([{ t: 'miss', to: 1 }]);
-    expect(eventMessages([{ type: 'point', winner: 'near', reason: 'ace' }], a, 2)).toEqual([]);
-    expect(eventMessages([{ type: 'whiff', player: 1 }, { type: 'point', winner: 'far', reason: 'missed' }], a, 1))
+    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'ace', by: null, rally: 0 }], a, 0)).toEqual([{ t: 'miss', to: 1 }]);
+    expect(eventMessages([{ type: 'point', winner: 'near', reason: 'ace', by: null, rally: 0 }], a, 2)).toEqual([]);
+    expect(eventMessages([{ type: 'whiff', player: 1 }, { type: 'point', winner: 'far', reason: 'missed', by: null, rally: 0 }], a, 1))
       .toEqual([{ t: 'miss', to: 3 }]);
   });
 
   describe('a whiff leaves the ball live, so only the outcome sends a miss', () => {
     const hit = (player: number): MatchEvent => ({
-      type: 'hit', player, quality: 0.8, power: 0.5, spin: 0, u: 0, speedKmh: 80, contact: { a: 0.1, b: 0, frame: false },
+      type: 'hit', player, quality: 0.8, power: 0.5, spin: 0, u: 0, speedKmh: 80, contact: { a: 0.1, b: 0, frame: false }, t: 0, stroke: 'forehand',
     });
 
     it('a whiff alone sends nothing', () => {
@@ -119,7 +119,7 @@ describe('messages to phones', () => {
         ...eventMessages([{ type: 'whiff', player: 0 }], a, 0, state),
         ...eventMessages([hit(0)], a, 0, state),
         // The next ball is lost to a CPU winner the player never swung at: no stale miss.
-        ...eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0, state),
+        ...eventMessages([{ type: 'point', winner: 'far', reason: 'winner', by: null, rally: 0 }], a, 0, state),
       ];
       expect(out.map((m) => m.t)).toEqual(['hit']);
     });
@@ -130,7 +130,7 @@ describe('messages to phones', () => {
         const out = [
           ...eventMessages([{ type: 'whiff', player: 0 }], a, 0, state),
           ...eventMessages([], a, 0, state),
-          ...eventMessages([{ type: 'point', winner: 'far', reason }], a, 0, state),
+          ...eventMessages([{ type: 'point', winner: 'far', reason, by: null, rally: 0 }], a, 0, state),
         ];
         expect(out, reason).toEqual([{ t: 'miss', to: 1 }]);
       }
@@ -140,7 +140,7 @@ describe('messages to phones', () => {
       const state = new Set<number>();
       const out = [
         ...eventMessages([{ type: 'whiff', player: 0 }], a, 0, state),
-        ...eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0, state),
+        ...eventMessages([{ type: 'point', winner: 'far', reason: 'winner', by: null, rally: 0 }], a, 0, state),
       ];
       expect(out).toEqual([{ t: 'miss', to: 1 }]);
       expect(state.size).toBe(0);
@@ -149,8 +149,8 @@ describe('messages to phones', () => {
     it('a whiff does not leak into the next point', () => {
       const state = new Set<number>();
       eventMessages([{ type: 'whiff', player: 0 }], a, 0, state);
-      eventMessages([{ type: 'point', winner: 'far', reason: 'out' }], a, 0, state);
-      expect(eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0, state)).toEqual([]);
+      eventMessages([{ type: 'point', winner: 'far', reason: 'out', by: null, rally: 0 }], a, 0, state);
+      expect(eventMessages([{ type: 'point', winner: 'far', reason: 'winner', by: null, rally: 0 }], a, 0, state)).toEqual([]);
     });
   });
 
@@ -200,9 +200,9 @@ describe('messages to phones', () => {
   });
 
   it('sends no miss for points lost another way, or for keyboard and CPU players', () => {
-    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'winner' }], a, 0)).toEqual([]);
-    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'missed' }], a, null)).toEqual([]);
-    expect(eventMessages([{ type: 'whiff', player: 1 }, { type: 'point', winner: 'far', reason: 'winner' }], { humans: 2, slots: [1, null] }, null)).toEqual([]);
+    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'winner', by: null, rally: 0 }], a, 0)).toEqual([]);
+    expect(eventMessages([{ type: 'point', winner: 'far', reason: 'missed', by: null, rally: 0 }], a, null)).toEqual([]);
+    expect(eventMessages([{ type: 'whiff', player: 1 }, { type: 'point', winner: 'far', reason: 'winner', by: null, rally: 0 }], { humans: 2, slots: [1, null] }, null)).toEqual([]);
   });
 
   it('maps the match phase to each player\'s prompt', () => {

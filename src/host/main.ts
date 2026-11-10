@@ -87,7 +87,7 @@ const matchLive = () => match !== null && playing !== null && !ended;
 
 function setupAssignment(): Assignment {
   const config = ui.config();
-  return assignPlayers(phones.values(), config.mode, config.humans);
+  return assignPlayers(phones.values(), config.mode, config.humans ?? 1);
 }
 /** The assignment phones are told about: the match in progress, else the setup screen's. */
 const currentAssignment = () => (matchLive() ? playing! : setupAssignment());
@@ -293,7 +293,7 @@ const ui = createUi(overlay, {
   onUnlock: () => audio.unlock(),
   onStart: (config) => {
     if (playing) releasePhones();
-    const a = assignPlayers(phones.values(), config.mode, config.humans);
+    const a = assignPlayers(phones.values(), config.mode, config.humans ?? 1);
     const full: MatchConfig = { ...config, humans: a.humans, ...matchIdentity(a, phones) };
     match = createMatch(full);
     seats = createSeats(a, phones);

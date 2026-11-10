@@ -59,6 +59,20 @@ addresses) runs inside `npm run verify`.
 **Why:** for a codebase this size the compiler flags catch the same slips a
 linter would, without a new dependency and configuration to maintain.
 
+## D10. Fable does the work; other models are the exception (2026-11-10)
+Gustav's instruction during the run: limit agents on other models, prefer
+Fable over Opus and Sonnet, Haiku may continue. The brief's delegation plan
+(Sonnet for scoped coding, Opus for reviews and design direction) is replaced:
+the main Fable session builds, one Fable subagent at a time takes a bounded
+piece or an independent review, Haiku does read-only surveys.
+**Kept on Opus:** only the relay build that was already running. Gustav then
+said Fable may do security work on this project, so the relay's audit and
+re-check are done by a fresh Fable subagent (this overrides the brief's
+"security-sensitive pieces stay off Fable" for this project).
+**Cost of the change:** independent reviews are by a fresh Fable context
+rather than a different model, so they share Fable's blind spots; the tests,
+the simulator and the browser checks carry more of the proof.
+
 ## D9. Fonts are bundled, never fetched (2026-11-10)
 Any typeface is an open-licence font shipped in the build.
 **Why:** the game runs on a home network, possibly with no internet, and a

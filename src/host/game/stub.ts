@@ -165,7 +165,10 @@ export function stubView(now: number, doubles = false): MatchView {
     if (id === 0 && shotIndex < 0) stance = 'serve';
     else if (id === 0 && shotIndex === 0 && tc - SERVE_AT < 400) stance = 'serve';
     else if (receiving && nextShot) stance = nextShot.stroke === 'serve' ? 'forehand' : nextShot.stroke;
-    return { id, side, human, name, color, pos: { x, y: 0, z }, stance, lastSwingAt, receiving };
+    return {
+      id, side, human, name, color, pos: { x, y: 0, z }, stance, lastSwingAt, receiving,
+      half: 0, leftHanded: false, style: null, machine: false,
+    };
   };
   const near = playerSpot('near', tc);
   const far = playerSpot('far', tc);
@@ -188,6 +191,7 @@ export function stubView(now: number, doubles = false): MatchView {
     serveNumber: 1,
     message,
     winner: null,
-    stats: { longestRally: 11, fastestShotKmh: Math.max(118, Math.round(speedKmh)) },
+    stats: { longestRally: 11, fastestShotKmh: Math.max(118, Math.round(speedKmh)), players: [], points: [0, 0] },
+    labels: ['You', 'CPU'],
   };
 }

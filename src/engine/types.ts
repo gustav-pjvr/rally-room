@@ -27,13 +27,42 @@ export const COURT = {
   ballDrawRadius: 0.06,
 } as const;
 
+/** CPU characters (personalities.ts). 'allround' is the plain level with no habits. */
+export type CpuStyle = 'allround' | 'wall' | 'cannon' | 'fox' | 'ace';
+
+/**
+ * One player of a match. Seats are listed near side first, then far; within a
+ * doubles side, the player covering x < 0 first. Singles has two seats,
+ * doubles four.
+ */
+export interface SeatConfig {
+  side: Side;
+  human: boolean;
+  name?: string;
+  color?: string;
+  /** Humans: swings the racket with the left hand (stances mirror). */
+  leftHanded?: boolean;
+  /** Humans: this player's own timing window; default is the match's `window`. */
+  window?: HitWindow;
+  /** CPUs: character and level; defaults are 'allround' and the match's `level`. */
+  style?: CpuStyle;
+  level?: Level;
+}
+
 export interface MatchConfig {
   mode: 'singles' | 'doubles';
-  /** Human players, all on the near side in v1: 1 (singles or doubles) or 2 (doubles). */
-  humans: 1 | 2;
+  /**
+   * Every player. When absent, the v1 shape below is used: `humans` humans on
+   * the near side against CPUs of `level`.
+   */
+  seats?: SeatConfig[];
+  /** v1 shape: human players, all on the near side: 1 (singles or doubles) or 2 (doubles). */
+  humans?: 1 | 2;
   names?: string[];
   colors?: string[];
+  /** Default CPU level. */
   level: Level;
+  /** Default timing window for humans. */
   window: HitWindow;
   length: MatchLength;
   /** Seed for the match's random numbers, so tests are repeatable. */
@@ -50,6 +79,8 @@ export interface SwingInput {
   power: number;
   /** -1 (slice) .. +1 (topspin) */
   spin: number;
+  /** Peak rotation rate of the swing, deg/s, when a phone made it (for the fastest-swing stat). */
+  omega?: number;
 }
 
 export interface PlayerView {
@@ -65,6 +96,31 @@ export interface PlayerView {
   lastSwingAt: number | null;
   /** True when this player is the one expected to hit the incoming ball. */
   receiving: boolean;
+  /** Doubles half: -1 covers x < 0, +1 covers x > 0, 0 in singles. */
+  half: -1 | 0 | 1;
+  leftHanded: boolean;
+  /** CPU character, null for a human. */
+  style: CpuStyle | null;
+  /** A ball machine (drills), drawn as a machine rather than a figure. */
+  machine: boolean;
+}
+
+/** What one player did in the match so far. */
+export interface PlayerStats {
+  hits: number;
+  /** Hits with quality of 0.7 or more. */
+  sweet: number;
+  frames: number;
+  whiffs: number;
+  /** Points this player won with the last touch (winners and aces). */
+  winners: number;
+  aces: number;
+  /** Points this player lost with the last touch (out, net, double fault, missed). */
+  errors: number;
+  doubleFaults: number;
+  fastestShotKmh: number;
+  /** Fastest swing, deg/s at the peak; 0 when no phone swing was seen. */
+  fastestSwing: number;
 }
 
 export interface BallView {
@@ -106,7 +162,35 @@ export interface MatchView {
   /** A short line to show big, e.g. "Out", "Fault", "Ace", "Game, Gustav"; null for none. */
   message: string | null;
   winner: Side | null;
-  stats: { longestRally: number; fastestShotKmh: number };
+  /** longestRally and fastestShotKmh (humans only) as in v1; `players` per player; `points` won per side. */
+  stats: { longestRally: number; fastestShotKmh: number; players: PlayerStats[]; points: [number, number] };
+  /** Team labels for the score, near then far. */
+  labels: [string, string];
+  /** Drills only (drill.ts); absent in a match. */
+  drill?: DrillView;
+}
+
+/** A target on the court for drills: a rectangle on the ground, centre (x, z), `w` wide (x) and `d` deep (z). */
+export interface TargetView { x: number; z: number; w: number; d: number; lit: boolean; label: string }
+
+export interface DrillView {
+  /** 'practice' free hitting at targets, or 'tutorial' scripted lessons. */
+  kind: 'practice' | 'tutorial';
+  title: string;
+  /** What to do now, one short line. */
+  hint: string;
+  targets: TargetView[];
+  /** Station progress: done of need (tutorial), or balls used of the basket (practice). */
+  done: number;
+  need: number;
+  /** Station index and count. */
+  station: number;
+  stations: number;
+  score: number;
+  streak: number;
+  bestStreak: number;
+  /** Result of the last ball, for a short call: null until one is played. */
+  last: 'target' | 'in' | 'out' | 'net' | 'missed' | 'fault' | null;
 }
 
 /**
@@ -123,16 +207,26 @@ export type MatchEvent =
    * power: the swing's power. u: timing ratio (Ts - T*) / W, negative early
    * (serves: toss timing, -1..1).
    */
-  | { type: 'hit'; player: number; quality: number; power: number; spin: number; u: number; speedKmh: number; contact: ContactPoint }
+  | {
+    type: 'hit'; player: number; quality: number; power: number; spin: number; u: number; speedKmh: number;
+    contact: ContactPoint;
+    /** Match time of the contact, ms, and which stroke it was. */
+    t: number; stroke: 'forehand' | 'backhand' | 'serve';
+  }
   | { type: 'whiff'; player: number }
   | { type: 'bounce'; pos: Vec3; in: boolean }
   | { type: 'net' }
   | { type: 'fault'; serveNumber: 1 | 2 }
-  | { type: 'point'; winner: Side; reason: 'winner' | 'out' | 'net' | 'double-fault' | 'missed' | 'ace' }
+  /** `by`: the player whose last touch decided it (the winner's for 'winner' and 'ace', the loser's otherwise); `rally`: shots played. */
+  | { type: 'point'; winner: Side; reason: 'winner' | 'out' | 'net' | 'double-fault' | 'missed' | 'ace'; by: number | null; rally: number }
+  /** Drills: a ball's result, and progress through the stations. */
+  | { type: 'drill'; result: NonNullable<DrillView['last']>; score: number; stationDone: boolean; finished: boolean }
   | { type: 'game'; winner: Side }
   | { type: 'match'; winner: Side };
 
 export interface Match {
+  /** Drills only: give up on the current station and move to the next. */
+  skip?(): void;
   /** Advance to host time `now` (ms) and return what happened since the last call. */
   update(now: number): MatchEvent[];
   /**
