@@ -22,6 +22,20 @@ every milestone.
   subagents. Do all of this work yourself, directly." Background agents go
   through `delegate_task`; foreground ones through `Agent`.
 
+## PAUSED (2026-11-10, at Gustav's request)
+Gustav said: "allow everything to finish and then pause work". No new work is
+started. The two background jobs that were running finish on their own; their
+output is then checked, committed and pushed, and the run stops there.
+**To resume:** re-read this file, then continue from "Next steps" below.
+
+## Next steps when work resumes
+1. Relay (M3): if not yet done, verify the Opus agent's result (`npx vitest run tests/relay*`, `npm run test:worker`, typecheck, scan), commit it, then have one fresh Fable subagent audit it (room isolation, limits, malformed input, host resume) and re-check the fixes.
+2. Add `scripts` and `vitest.sim.config.ts` to tsconfig `include`, and `"sim": "vitest run --config vitest.sim.config.ts"` to package.json (held back while the relay agent owned those files).
+3. Design (M4): look at direction A's contact sheet (`docs/v2/mockups/a-poster/shots/sheet.png`), then run directions B (club scoreboard) and C (broadcast '75) one at a time on a Fable subagent with the same brief, pick one, record why in DECISIONS (and move D10 below D9 there: entries are meant to be newest last).
+4. Independent review of M1 and M2 (engine and simulator) by a fresh Fable subagent; fix findings with a failing test first; one re-check.
+5. Host pure modules still to write: seats for four players on two sides (rewrite of `src/host/phones.ts`), per-phone messages for any seat, frame-time recorder and quality governor. Then the client side of protocol v2 in `src/host/net.ts` and `src/phone/net.ts` (new URL scheme, room key, host-away and host-back, `hb` keepalive, `trace`).
+6. Then M5 (scene), M6 (host app), M7 (phone app), M8 (e2e and chain in every mode), M9 (tuning, see notes), M10, M11.
+
 ## State
 
 | Milestone | State | Notes |
@@ -31,7 +45,7 @@ every milestone.
 | M2 Simulator | built, validated, review pending | `src/sim/` runner, synthetic swings (templates from teach and tuning, checked against held-out: detection 98%, peak offset median 5 ms, KS to held-out 0.13 against 0.13 for the real tuning swings, spin accuracy 73%), player models, analysis, `scripts/sim/report.sim.ts`. First report (12 matches per cell) in `docs/v2/sim/REPORT.md`. |
 | M3 Relay | in progress | Opus agent (delegate_task, started before the routing change) building core, Node and Worker adapters. Its files are uncommitted: server/, worker/, tests/relay*, src/shared/protocol.ts, package.json, tsconfig.json. Audit and re-check go to a fresh Fable subagent. |
 | M4 Design direction | in progress | `docs/v2/DESIGN-V2.md` written. Direction A mock-ups running on a Fable subagent (delegate_task). B and C follow one at a time. |
-| M5 Scene | not started | |
+| M5 Scene | not started | Pure pieces ready: `src/shared/trace.ts` (phone recorder, validation, racket path; on the real swings topspin rises and slice falls) and `src/host/replay.ts` (clip of the deciding shot at 0.4 speed, trace attached). |
 | M6 Host app | not started | |
 | M7 Phone app | not started | |
 | M8 End to end | not started | |
@@ -59,6 +73,7 @@ every milestone.
   handover note. Read HANDOVER, DESIGN and the v1 core. PLAN and DECISIONS written.
 - 2026-11-10: Gustav changed the routing during the run (Fable first, no more Opus or Sonnet agents; the running Opus relay build finishes; Fable may do security work here). Three Opus design agents cancelled.
 - 2026-11-10: M0 done apart from the e2e baseline; M1 and M2 built and tested.
+- 2026-11-10: trace and replay modules written and tested. Gustav asked to let the running jobs finish and then pause.
 
 ## Broken or open
 - v1 e2e baseline not run (see M0). The v1 host and phone pages still run on the moved engine; they are replaced in M6 and M7.
