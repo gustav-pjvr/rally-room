@@ -26,22 +26,41 @@ every milestone.
 
 | Milestone | State | Notes |
 |---|---|---|
-| M0 Foundations | in progress | verify baseline green (198 tests). e2e baseline pending: CPU was above 90% (another project's headless Chrome). |
-| M1 Engine v2 | not started | |
-| M2 Simulator | not started | |
-| M3 Relay | not started | |
-| M4 Design direction | not started | |
+| M0 Foundations | done except the e2e baseline | verify baseline green (198 tests). Fixture split written; detection reference: fixed rule 73% overall, 69% held-out; calibrated 81% overall, 85% held-out. Scan and strict flags in verify. Engine moved to `src/engine/`. The v1 e2e baseline was never run: the CPU was pegged by another project's browser tests for the whole first hours. |
+| M1 Engine v2 | built, tests green, review pending | Seats on both sides (versus 1v1 and 2v2), CPU characters (`personalities.ts`), per-player windows and stats, richer events, drills (`drill.ts`: practice zones, tutorial). 227 unit tests pass (relay tests excluded: in progress). |
+| M2 Simulator | built, validated, review pending | `src/sim/` runner, synthetic swings (templates from teach and tuning, checked against held-out: detection 98%, peak offset median 5 ms, KS to held-out 0.13 against 0.13 for the real tuning swings, spin accuracy 73%), player models, analysis, `scripts/sim/report.sim.ts`. First report (12 matches per cell) in `docs/v2/sim/REPORT.md`. |
+| M3 Relay | in progress | Opus agent (delegate_task, started before the routing change) building core, Node and Worker adapters. Its files are uncommitted: server/, worker/, tests/relay*, src/shared/protocol.ts, package.json, tsconfig.json. Audit and re-check go to a fresh Fable subagent. |
+| M4 Design direction | in progress | `docs/v2/DESIGN-V2.md` written. Direction A mock-ups running on a Fable subagent (delegate_task). B and C follow one at a time. |
 | M5 Scene | not started | |
 | M6 Host app | not started | |
 | M7 Phone app | not started | |
 | M8 End to end | not started | |
-| M9 Tuning | not started | |
+| M9 Tuning | not started | See "Tuning notes" below. |
 | M10 Ready to ship | not started | |
 | M11 Close out | not started | |
+
+## Tuning notes from the first simulator report (for M9)
+- The CPU ladder is too hard for simulated phone players: a Regular wins 17% against The Regular at Club, nobody beats Pro, a Beginner wins nothing at Rookie on Normal timing.
+- The Wall is overtuned: it beats even a Sharp player at Rookie.
+- Real swings give modest power (median 0.46), so the human's balls are slow and the CPU is never under pressure; human winners are rare. Candidate: map power relative to each player's own swing range.
+- Candidate: an "Auto" timing window per player (the engine already has per-seat windows).
+- Versus is healthy: 3.5 shots per point for beginners, 6 for casual players, 10 to 12 for skilled ones; a first-to-3-games match takes 4 to 10 minutes.
+- Lag up to 300 ms costs nothing measurable (lag compensation works).
+- The tutorial takes 1.3 to 1.6 minutes and every simulated skill finishes it.
+- Two bots with bounded, uniform timing error never miss and rally for ever: use normal (Gaussian) error in tests.
+
+## Environment notes
+- Shell heredocs fail when the body has an odd number of apostrophes: write files with the Write tool and run scripts from the scratchpad.
+- The CPU is often above 90% from another project's Playwright runs (not ours). Check before every test run; single test files are light, the full suite takes 8 s on a free machine.
+- `npx vitest run --exclude "tests/relay*" --exclude "tests/relay/**"` runs everything but the relay agent's work in progress.
 
 ## Log
 - 2026-11-10: branch `v2` created; first commit holds the brief and the
   handover note. Read HANDOVER, DESIGN and the v1 core. PLAN and DECISIONS written.
+- 2026-11-10: Gustav changed the routing during the run (Fable first, no more Opus or Sonnet agents; the running Opus relay build finishes; Fable may do security work here). Three Opus design agents cancelled.
+- 2026-11-10: M0 done apart from the e2e baseline; M1 and M2 built and tested.
 
 ## Broken or open
-- Nothing broken.
+- v1 e2e baseline not run (see M0). The v1 host and phone pages still run on the moved engine; they are replaced in M6 and M7.
+- `scripts/` and `vitest.sim.config.ts` are not in tsconfig `include` yet (tsconfig is in the relay agent's hands until it finishes).
+- `npm run sim` script entry not added to package.json yet (same reason): run `npx vitest run --config vitest.sim.config.ts`.

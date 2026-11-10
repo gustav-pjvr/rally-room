@@ -25,8 +25,8 @@ export interface Skill {
   lapse: number;
   /** How often the player tries to place the ball (swinging early or late on purpose), 0 to 1. */
   aim: number;
-  /** How far from the ideal contact an aimed swing is meant to be, ms. */
-  aimOffset: number;
+  /** How far from the ideal contact an aimed swing is meant to be, as a share of the timing window W (0.5 is half-way to the edge of the strings). */
+  aimU: number;
   /** Share of swings meant as topspin, flat and slice. */
   spinMix: Record<SwingKind, number>;
   /** Serve: timing sd around the top of the toss, ms. */
@@ -36,11 +36,11 @@ export interface Skill {
 export type SkillName = 'beginner' | 'casual' | 'regular' | 'good' | 'sharp';
 
 export const SKILLS: Record<SkillName, Skill> = {
-  beginner: { name: 'Beginner', timingSd: 95, timingBias: 30, lapse: 0.08, aim: 0, aimOffset: 0, spinMix: { top: 0.2, flat: 0.7, slice: 0.1 }, serveSd: 160 },
-  casual: { name: 'Casual', timingSd: 70, timingBias: 15, lapse: 0.04, aim: 0.1, aimOffset: 60, spinMix: { top: 0.3, flat: 0.55, slice: 0.15 }, serveSd: 120 },
-  regular: { name: 'Regular', timingSd: 50, timingBias: 5, lapse: 0.02, aim: 0.35, aimOffset: 70, spinMix: { top: 0.45, flat: 0.4, slice: 0.15 }, serveSd: 90 },
-  good: { name: 'Good', timingSd: 35, timingBias: 0, lapse: 0.01, aim: 0.6, aimOffset: 75, spinMix: { top: 0.5, flat: 0.3, slice: 0.2 }, serveSd: 70 },
-  sharp: { name: 'Sharp', timingSd: 22, timingBias: 0, lapse: 0.005, aim: 0.8, aimOffset: 80, spinMix: { top: 0.55, flat: 0.25, slice: 0.2 }, serveSd: 50 },
+  beginner: { name: 'Beginner', timingSd: 95, timingBias: 30, lapse: 0.08, aim: 0, aimU: 0, spinMix: { top: 0.2, flat: 0.7, slice: 0.1 }, serveSd: 160 },
+  casual: { name: 'Casual', timingSd: 70, timingBias: 15, lapse: 0.04, aim: 0.1, aimU: 0.45, spinMix: { top: 0.3, flat: 0.55, slice: 0.15 }, serveSd: 120 },
+  regular: { name: 'Regular', timingSd: 50, timingBias: 5, lapse: 0.02, aim: 0.35, aimU: 0.5, spinMix: { top: 0.45, flat: 0.4, slice: 0.15 }, serveSd: 90 },
+  good: { name: 'Good', timingSd: 35, timingBias: 0, lapse: 0.01, aim: 0.6, aimU: 0.55, spinMix: { top: 0.5, flat: 0.3, slice: 0.2 }, serveSd: 70 },
+  sharp: { name: 'Sharp', timingSd: 22, timingBias: 0, lapse: 0.005, aim: 0.8, aimU: 0.6, spinMix: { top: 0.55, flat: 0.25, slice: 0.2 }, serveSd: 50 },
 };
 
 /** Delay between the swing's peak and its message reaching the host, ms. */
@@ -79,9 +79,11 @@ function pickKind(mix: Record<SwingKind, number>, rng: Rng): SwingKind {
 /**
  * A simulated player with a phone. `bank` is the synthetic swings the real
  * detector has already read (buildBank); a swing the detector missed is a
- * swing the game never hears about.
+ * swing the game never hears about. `windowMs` is the timing unit W the player
+ * plays with: a player who aims swings early or late by a share of it.
  */
-export function phoneBot(skill: Skill, bank: BankEntry[], rng: Rng, network: Network = NETWORKS.lan): Bot {
+export function phoneBot(skill: Skill, bank: BankEntry[], rng: Rng, network: Network = NETWORKS.lan, windowMs = 130): Bot {
+  const aimOffset = skill.aimU * windowMs;
   const pool = new Map<string, BankEntry[]>();
   for (const e of bank) {
     const key = `${e.side}:${e.kind}`;
@@ -108,7 +110,7 @@ export function phoneBot(skill: Skill, bank: BankEntry[], rng: Rng, network: Net
       const entry = draw(side, kind);
       if (!entry || !entry.detected) return null;
       const intent: Intent = rng() < skill.aim ? (rng() < 0.5 ? 'cross' : 'line') : 'safe';
-      const meant = intent === 'cross' ? -skill.aimOffset : intent === 'line' ? skill.aimOffset : 0;
+      const meant = intent === 'cross' ? -aimOffset : intent === 'line' ? aimOffset : 0;
       let dt = meant + skill.timingBias + gauss(rng, skill.timingSd);
       if (rng() < skill.lapse) {
         if (rng() < 0.3) return null;
