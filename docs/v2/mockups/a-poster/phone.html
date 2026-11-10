@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en" class="phone">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rally Room | Phone screens (direction A)</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html.phone { font-size: 16px; }
+  html.phone body { background: var(--cream); color: var(--ink); min-height: 100vh; }
+
+  /* the sheet: four 390 x 844 frames side by side */
+  .sheet { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 28px 56px; padding: 40px 32px; min-height: 100vh; }
+  .unit { display: grid; gap: 14px; }
+  .unit figcaption { font-family: var(--display); font-weight: 900; text-transform: uppercase; font-size: 2rem; line-height: 1; display: flex; gap: 0.6rem; align-items: baseline; }
+  .unit figcaption b { color: var(--on-cream-2); }
+  .device { width: 390px; height: 844px; position: relative; overflow: hidden; box-shadow: 0 0 0 6px var(--ink); }
+
+  /* one screen alone: phone.html?screen=join|allow|lobby|play */
+  html[data-screen] body { background: var(--ink); }
+  html[data-screen] .sheet { display: block; padding: 0; min-height: 0; }
+  html[data-screen] .unit { display: none; }
+  html[data-screen="join"] .unit[data-screen="join"], html[data-screen="allow"] .unit[data-screen="allow"],
+  html[data-screen="lobby"] .unit[data-screen="lobby"], html[data-screen="play"] .unit[data-screen="play"] { display: block; }
+  html[data-screen] .unit figcaption { display: none; }
+  html[data-screen] .device { width: 100%; height: 100vh; height: 100dvh; min-height: 560px; box-shadow: none; }
+
+  .scr { position: absolute; inset: 0; display: flex; flex-direction: column;
+    padding: max(18px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
+  .scr p, .scr li { font-size: 1.0625rem; line-height: 1.35; }
+  .scr .lab { font-size: 1rem; }
+  .scr h1 { font-size: 3.4rem; }
+  .scr .btn { width: 100%; min-height: 64px; font-size: 2.1rem; padding: 0.4rem 1rem 0.5rem; }
+  .scr .btn-ghost { min-height: 52px; font-size: 1.5rem; box-shadow: inset 0 0 0 3px currentColor; }
+  .on-teal { background: var(--teal); color: var(--cream); }
+  .on-teal .dim { color: var(--on-teal-2); }
+  .mark { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .mark .d { font-size: 1.5rem; }
+  .mark .lab { color: var(--on-teal-2); }
+
+  /* 1 join */
+  .join h1 { margin-bottom: 16px; }
+  .field { display: grid; gap: 6px; margin-bottom: 14px; }
+  .field > label, .field > legend { font-family: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 1rem; line-height: 1.2; padding: 0; }
+  .field legend { margin-bottom: 6px; }
+  .field input[type="text"] { width: 100%; height: 56px; border: 0; border-radius: 0; background: var(--cream); color: var(--ink); padding: 0 14px; font-family: var(--text); font-weight: 700; font-size: 1.375rem; touch-action: manipulation; }
+  .field input.code { font-family: var(--display); font-weight: 900; font-size: 2.4rem; letter-spacing: 0.22em; text-transform: uppercase; padding-bottom: 2px; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+  .seg label { position: relative; min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 700; font-size: 1.25rem; box-shadow: inset 0 0 0 2.5px rgba(243, 233, 210, 0.5); touch-action: manipulation; transition: transform 160ms var(--ease); }
+  .seg label:active { transform: scale(0.97); }
+  .seg input { position: absolute; inset: 0; opacity: 0; margin: 0; }
+  .seg label::before { content: ""; width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 2.5px currentColor; }
+  .seg label:has(input:checked) { background: var(--cream); color: var(--ink); box-shadow: none; }
+  .seg label:has(input:checked)::before { background: var(--ink); box-shadow: none; }
+  .seg label:has(input:focus-visible) { outline: 3px solid var(--cream); outline-offset: 3px; }
+  .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .swatches label { position: relative; display: grid; gap: 5px; justify-items: center; font-weight: 600; font-size: 1rem; line-height: 1.2; touch-action: manipulation; }
+  .swatches input { position: absolute; inset: 0; opacity: 0; margin: 0; }
+  .swatches i { display: block; width: 100%; height: 52px; background: var(--c); position: relative; }
+  .swatches label:has(input:checked) i { box-shadow: 0 0 0 3px var(--teal), 0 0 0 6px var(--cream); }
+  .swatches label:has(input:checked) i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--ink); }
+  .swatches label:has(input:checked) { font-weight: 700; }
+  .preview { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 4px 0 12px; }
+  .preview svg { height: 100%; max-height: 170px; width: auto; max-width: 100%; }
+  .join .btn { margin-top: auto; flex: none; }
+
+  /* 2 allow motion */
+  .allow h1 { font-size: 3.1rem; }
+  .grip { flex: 1 1 auto; min-height: 0; margin: 10px 0 6px; display: flex; justify-content: center; }
+  .grip svg { height: 100%; width: auto; max-width: 100%; }
+  .allow ol { display: grid; gap: 6px; margin-bottom: 16px; }
+  .allow li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; }
+  .allow li b { font-family: var(--display); font-weight: 900; font-size: 1.5rem; line-height: 1; color: var(--on-cream-2); }
+  .allow .btn { min-height: 76px; font-size: 2.5rem; }
+  .allow .after { margin-top: 10px; text-align: center; color: var(--on-cream-2); }
+
+  /* 3 lobby */
+  .lobby h1 { margin-bottom: 12px; }
+  .power { flex: 1 1 0; min-height: 124px; max-height: 300px; padding: 14px 16px 16px; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: end; }
+  .power .num { font-size: 6.4rem; line-height: 0.8; display: block; }
+  .power .lab { color: var(--on-ink-2); margin-bottom: 8px; display: block; }
+  .power .bars { display: grid; grid-template-columns: repeat(14, 1fr); gap: 4px; align-items: end; height: 100%; min-height: 0; }
+  .power .bars i { background: rgba(243, 233, 210, 0.2); }
+  .power .bars i.on { background: var(--cream); }
+  .spin { display: flex; align-items: baseline; gap: 12px; margin: 14px 0; }
+  .spin .d { font-size: 2.6rem; }
+  .teach { padding: 14px 16px 16px; display: grid; gap: 8px; }
+  .teach h2 { font-size: 1.9rem; line-height: 0.92; }
+  .teach .btn { margin-top: 4px; }
+  .status { flex: none; margin: 16px -20px -18px; padding: 14px 20px max(16px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; }
+  .status .fig { grid-row: span 2; width: 18px; height: 36px; box-shadow: 0 0 0 2.5px var(--cream); }
+  .status .d { font-size: 1.7rem; }
+  .status p { color: var(--on-ink-2); display: flex; align-items: center; gap: 8px; }
+  .status p i { flex: none; width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 2.5px var(--cream); animation: wait 1.6s var(--ease) infinite; }
+
+  /* 4 in play: the racket is the screen */
+  .play { padding: 0; background: var(--ink); color: var(--cream); }
+  .play svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .play .hud { position: absolute; left: max(14px, env(safe-area-inset-left)); right: max(14px, env(safe-area-inset-right)); top: max(14px, env(safe-area-inset-top)); display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .play .sc { background: var(--ink); padding: 8px 12px 9px; font-weight: 700; font-size: 1rem; line-height: 1.2; display: flex; align-items: center; gap: 8px; box-shadow: inset 0 0 0 2px rgba(243, 233, 210, 0.35); min-height: 48px; }
+  .play .sc b { font-family: var(--display); font-weight: 900; font-size: 1.6rem; line-height: 1; }
+  .play .sc .serve-mark { width: 11px; height: 11px; }
+  .play .pause { flex: none; width: 52px; height: 52px; border: 0; background: var(--ink); box-shadow: inset 0 0 0 2px rgba(243, 233, 210, 0.35); display: grid; grid-auto-flow: column; gap: 7px; place-content: center; touch-action: manipulation; transition: transform 160ms var(--ease); }
+  .play .pause:active { transform: scale(0.94); }
+  .play .pause i { width: 7px; height: 20px; background: var(--cream); }
+  .play .word { position: absolute; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); padding: 8px 16px 10px; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .play .word i { width: 16px; height: 16px; border-radius: 50%; background: var(--ball); }
+  .play .word .d { font-size: 2rem; }
+</style>
+<script>
+  // ?screen=join|allow|lobby|play shows one screen alone, full viewport.
+  (function () {
+    var s = new URLSearchParams(location.search).get('screen');
+    if (s === 'join' || s === 'allow' || s === 'lobby' || s === 'play') document.documentElement.setAttribute('data-screen', s);
+  })();
+</script>
+</head>
+<body>
+<main class="sheet">
+
+  <figure class="unit" data-screen="join">
+    <div class="device">
+      <form class="scr join on-teal" onsubmit="return false">
+        <p class="mark"><span class="d">Rally Room</span><span class="lab">Phone 1 of 4</span></p>
+        <h1 class="d">Grab a racket</h1>
+        <div class="field">
+          <label for="j-code">Room code</label>
+          <input class="code" id="j-code" type="text" value="K7QM" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="j-name">Your name</label>
+          <input id="j-name" type="text" value="Gustav" maxlength="12" autocomplete="given-name">
+        </div>
+        <fieldset class="field">
+          <legend>Playing hand</legend>
+          <div class="seg">
+            <label><input type="radio" name="hand">Left</label>
+            <label><input type="radio" name="hand" checked>Right</label>
+          </div>
+        </fieldset>
+        <fieldset class="field">
+          <legend>Racket colour</legend>
+          <div class="swatches">
+            <label class="c-apricot"><input type="radio" name="col" checked><i></i>Apricot</label>
+            <label class="c-rose"><input type="radio" name="col"><i></i>Rose</label>
+            <label class="c-mint"><input type="radio" name="col"><i></i>Mint</label>
+            <label class="c-plum"><input type="radio" name="col"><i></i>Plum</label>
+          </div>
+        </fieldset>
+        <div class="preview" aria-hidden="true">
+          <svg viewBox="0 0 340 150" focusable="false">
+            <path d="M214 52 L300 70 M214 98 L300 80" stroke="#F2A65A" stroke-width="12" fill="none"/>
+            <rect x="288" y="62" width="52" height="26" fill="#F2A65A"/>
+            <clipPath id="pv"><ellipse cx="120" cy="75" rx="106" ry="62"/></clipPath>
+            <g clip-path="url(#pv)"><rect width="340" height="150" fill="#0B3C49"/><path d="M30 0V150M48 0V150M66 0V150M84 0V150M102 0V150M120 0V150M138 0V150M156 0V150M174 0V150M192 0V150M210 0V150M0 21H240M0 39H240M0 57H240M0 75H240M0 93H240M0 111H240M0 129H240" stroke="#F3E9D2" stroke-width="1.8" opacity="0.7"/></g>
+            <ellipse cx="120" cy="75" rx="106" ry="62" fill="none" stroke="#F2A65A" stroke-width="13"/>
+          </svg>
+        </div>
+        <button class="btn btn-primary" type="submit">Join</button>
+      </form>
+    </div>
+    <figcaption><b>1</b> Join</figcaption>
+  </figure>
+
+  <figure class="unit" data-screen="allow">
+    <div class="device">
+      <section class="scr allow paper">
+        <h1 class="d">Hold it like a racket</h1>
+        <div class="grip">
+          <svg viewBox="0 0 300 350" role="img" aria-labelledby="grip-t">
+            <title id="grip-t">A hand holds the phone upright by its bottom half. The racket head would sit above the top of the phone, and the screen faces sideways like the strings.</title>
+            <!-- where the racket head would be -->
+            <ellipse cx="150" cy="82" rx="62" ry="72" fill="none" stroke="#1B1B1E" stroke-width="5" stroke-dasharray="3 11" stroke-linecap="round"/>
+            <path d="M118 144 L134 166 M182 144 L166 166" stroke="#1B1B1E" stroke-width="5" stroke-dasharray="3 11" stroke-linecap="round" fill="none"/>
+            <!-- swing arc -->
+            <path d="M238 250 C276 196 272 122 236 78" fill="none" stroke="#1B1B1E" stroke-width="5"/>
+            <path d="M222 82 L236 78 L242 94" fill="none" stroke="#1B1B1E" stroke-width="5" stroke-linejoin="miter"/>
+            <!-- forearm and palm behind the phone -->
+            <path d="M176 262 L262 350 L176 350 Z" fill="#F2A65A" stroke="#1B1B1E" stroke-width="5" stroke-linejoin="round"/>
+            <rect x="96" y="236" width="52" height="86" rx="20" fill="#F2A65A" stroke="#1B1B1E" stroke-width="5"/>
+            <!-- phone -->
+            <rect x="110" y="160" width="80" height="174" rx="13" fill="#1B1B1E"/>
+            <clipPath id="grip-s"><rect x="117" y="168" width="66" height="158" rx="7"/></clipPath>
+            <g clip-path="url(#grip-s)">
+              <rect x="117" y="168" width="66" height="158" fill="#0F4C5C"/>
+              <g stroke="#F3E9D2" stroke-width="1.6" opacity="0.75">
+                <path d="M128 168V326M139 168V326M150 168V326M161 168V326M172 168V326M117 180H183M117 192H183M117 204H183M117 216H183M117 228H183M117 240H183"/>
+              </g>
+            </g>
+            <!-- fingers across the bottom half -->
+            <g fill="#F2A65A" stroke="#1B1B1E" stroke-width="5">
+              <rect x="118" y="246" width="92" height="22" rx="11"/>
+              <rect x="114" y="266" width="98" height="22" rx="11"/>
+              <rect x="116" y="286" width="94" height="22" rx="11"/>
+              <rect x="122" y="306" width="84" height="22" rx="11"/>
+            </g>
+          </svg>
+        </div>
+        <ol>
+          <li><b>1</b><span>Hold the bottom half, like a racket handle.</span></li>
+          <li><b>2</b><span>The top points up, where the racket head would be.</span></li>
+          <li><b>3</b><span>The screen faces sideways, like the strings.</span></li>
+        </ol>
+        <button class="btn btn-primary" type="button">Allow motion</button>
+        <p class="after">Your phone asks once. Tap Allow.</p>
+      </section>
+    </div>
+    <figcaption><b>2</b> Allow motion</figcaption>
+  </figure>
+
+  <figure class="unit" data-screen="lobby">
+    <div class="device">
+      <section class="scr lobby on-teal">
+        <p class="mark"><span class="d">Room K7QM</span><span class="lab">Gustav, right hand</span></p>
+        <h1 class="d">Swing to test</h1>
+        <div class="power ink" role="img" aria-label="Last swing power 72 out of 100">
+          <div><span class="lab">Power</span><span class="num d">72</span></div>
+          <div class="bars"><i class="on" style="height:22%"></i><i class="on" style="height:28%"></i><i class="on" style="height:34%"></i><i class="on" style="height:40%"></i><i class="on" style="height:46%"></i><i class="on" style="height:52%"></i><i class="on" style="height:58%"></i><i class="on" style="height:64%"></i><i class="on" style="height:70%"></i><i class="on" style="height:76%"></i><i style="height:82%"></i><i style="height:88%"></i><i style="height:94%"></i><i style="height:100%"></i></div>
+        </div>
+        <p class="spin"><span class="lab dim">Spin</span><span class="d">Topspin</span></p>
+        <div class="teach paper">
+          <h2 class="d">Teach your racket your spin</h2>
+          <p>Spin: <strong>automatic</strong>. 18 swings, about a minute.</p>
+          <button class="btn btn-ghost" type="button">Teach your racket</button>
+        </div>
+        <div class="status ink" role="status">
+          <span class="fig c-apricot" aria-hidden="true"></span>
+          <span class="d">You are player 1</span>
+          <p><i aria-hidden="true"></i>Waiting for the host to start.</p>
+        </div>
+      </section>
+    </div>
+    <figcaption><b>3</b> Lobby</figcaption>
+  </figure>
+
+  <figure class="unit" data-screen="play">
+    <div class="device">
+      <section class="scr play" aria-label="Your racket">
+        <svg viewBox="0 0 390 844" preserveAspectRatio="xMidYMin slice" aria-hidden="true" focusable="false">
+          <rect width="390" height="844" fill="#1B1B1E"/>
+          <!-- throat and handle -->
+          <path d="M92 664 L176 850 M298 664 L214 850" stroke="#F2A65A" stroke-width="26" fill="none"/>
+          <rect x="169" y="800" width="52" height="60" fill="#F2A65A"/>
+          <!-- string bed -->
+          <clipPath id="bed"><ellipse cx="195" cy="418" rx="166" ry="318"/></clipPath>
+          <g clip-path="url(#bed)">
+            <rect width="390" height="844" fill="#0F4C5C"/>
+            <g stroke="#F3E9D2" stroke-width="2.4" opacity="0.72">
+              <path d="M41 0V844M63 0V844M85 0V844M107 0V844M129 0V844M151 0V844M173 0V844M195 0V844M217 0V844M239 0V844M261 0V844M283 0V844M305 0V844M327 0V844M349 0V844"/>
+              <path d="M0 132H390M0 154H390M0 176H390M0 198H390M0 220H390M0 242H390M0 264H390M0 286H390M0 308H390M0 330H390M0 352H390M0 374H390M0 396H390M0 418H390M0 440H390M0 462H390M0 484H390M0 506H390M0 528H390M0 550H390M0 572H390M0 594H390M0 616H390M0 638H390M0 660H390M0 682H390M0 704H390"/>
+            </g>
+            <!-- contact ripple, caught mid-way: it starts where the ball met the strings -->
+            <g fill="none" stroke="#D8EF3A">
+              <circle cx="212" cy="372" r="34" stroke-width="11"/>
+              <circle cx="212" cy="372" r="74" stroke-width="8" opacity="0.85"/>
+              <circle cx="212" cy="372" r="120" stroke-width="5" opacity="0.6"/>
+              <circle cx="212" cy="372" r="170" stroke-width="3" opacity="0.35"/>
+            </g>
+            <circle cx="212" cy="372" r="13" fill="#D8EF3A"/>
+          </g>
+          <!-- frame in the team colour, with a printed keyline -->
+          <ellipse cx="195" cy="418" rx="166" ry="318" fill="none" stroke="#F2A65A" stroke-width="28"/>
+          <ellipse cx="195" cy="418" rx="166" ry="318" fill="none" stroke="#1B1B1E" stroke-width="3"/>
+        </svg>
+        <div class="hud">
+          <p class="sc"><span class="serve-mark" aria-hidden="true"></span>You <b>30</b> <b>40</b> The Wall</p>
+          <button class="pause" type="button" aria-label="Pause"><i></i><i></i></button>
+        </div>
+        <p class="word" role="status"><i aria-hidden="true"></i><span class="d">Sweet spot</span></p>
+      </section>
+    </div>
+    <figcaption><b>4</b> In play</figcaption>
+  </figure>
+
+</main>
+<div class="grain" aria-hidden="true"></div>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" class="host">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rally Room | Match (direction A)</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* score bug */
+  .bug { position: absolute; left: 0; top: 0; padding: 0.45rem; }
+  .bug .row { display: grid; grid-template-columns: 1.5rem 1.5rem minmax(15rem, auto) 4rem 7.25rem; align-items: center; gap: 1rem; padding-left: 0.9rem; }
+  .bug .row + .row { margin-top: 0.45rem; padding-top: 0.45rem; border-top: 0.25rem solid rgba(243, 233, 210, 0.3); }
+  .bug .nm { font-size: 3.6rem; padding-top: 0.2rem; }
+  .bug .gm { font-size: 3.6rem; text-align: center; color: var(--on-ink-2); padding-top: 0.2rem; }
+  .bug .pt { font-size: 4.9rem; text-align: center; padding: 0.35rem 0 0.5rem; }
+  .bug .foot { display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 0.9rem 0.4rem; color: var(--on-ink-2); }
+  .bug .foot .key { color: var(--cream); }
+
+  .rally { position: absolute; right: 0; top: 0; padding: 1.1rem 1.6rem 1rem; text-align: right; }
+  .rally .d { font-size: 9.5rem; margin-top: 0.5rem; }
+
+  .call { position: absolute; left: 50%; top: 0; margin-left: -13.5rem; width: 27rem; text-align: center; animation: land 220ms var(--ease) both; }
+  .call .word { font-size: 16.5rem; line-height: 0.8; padding: 1.2rem 0 1.7rem; letter-spacing: -0.01em; }
+  .call .to { font-size: 3.1rem; padding: 0.7rem 0 0.8rem; }
+
+  .fb { position: absolute; left: 0; bottom: 0; width: 34rem; padding: 1.2rem 1.5rem 1.4rem; }
+  .fb .who { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1rem; }
+  .fb .who .fig { width: 1rem; height: 2rem; box-shadow: 0 0 0 0.16rem var(--cream); }
+  .fb .who .dim { margin-left: auto; font-weight: 600; }
+
+  .serve { position: absolute; right: 0; bottom: 0; padding: 1.2rem 1.6rem 1.4rem; }
+  .serve .d { font-size: 4.25rem; white-space: nowrap; display: flex; align-items: center; gap: 1rem; margin-bottom: 0.7rem; }
+</style>
+</head>
+<body>
+<div class="scene" data-court="match"></div>
+<div class="stage"><main class="frame"><div class="safe">
+
+  <section class="bug ink" role="group" aria-label="Score">
+    <div class="row">
+      <span class="serve-mark" title="Serving"><span class="sr">Serving</span></span>
+      <span class="fig c-apricot" aria-hidden="true"></span>
+      <span class="nm d">Gustav</span><span class="gm d" aria-label="Games 2">2</span><span class="pt d paper" aria-label="Points 30">30</span>
+    </div>
+    <div class="row">
+      <span class="serve-mark off"></span>
+      <span class="fig hoop c-mint" aria-hidden="true"></span>
+      <span class="nm d">The Wall</span><span class="gm d" aria-label="Games 1">1</span><span class="pt d paper" aria-label="Points 40">40</span>
+    </div>
+    <p class="foot"><span class="key">Esc</span> Pause</p>
+  </section>
+
+  <section class="call" role="status">
+    <p class="word d ink">Out</p>
+    <p class="to d paper">Point to The Wall</p>
+  </section>
+
+  <section class="rally ink" aria-label="Rally">
+    <p class="lab">Rally</p>
+    <p class="d">14</p>
+  </section>
+
+  <section class="fb ink" aria-label="Gustav, last shot">
+    <p class="who"><span class="fig c-apricot" aria-hidden="true"></span><span class="lab">Gustav</span><span class="dim">Last shot</span></p>
+    <div class="shot">
+      <div class="strip" style="--at:84%" role="img" aria-label="Timing: late"><i></i><i></i><i></i><b></b></div>
+      <div class="strip-labs" aria-hidden="true"><span>Early</span><span>On time</span><span>Late</span></div>
+      <p class="contact"><span class="face" style="--x:50%;--y:17%" aria-hidden="true"></span><span class="d">Tip</span></p>
+    </div>
+  </section>
+
+  <section class="serve ink" role="status">
+    <p class="d"><span class="serve-mark" aria-hidden="true"></span>Gustav to serve</p>
+    <p style="max-width:30rem">Swing up to toss the ball, then swing through it.</p>
+  </section>
+
+</div></main></div>
+<div class="grain" aria-hidden="true"></div>
+<script src="court.js"></script>
+</body>
+</html>

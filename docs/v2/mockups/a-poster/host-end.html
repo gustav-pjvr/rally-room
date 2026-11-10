@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" class="host">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rally Room | Result (direction A)</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* the result is a printed sheet: it lands once and holds still */
+  .sheet { position: absolute; left: 0; top: 0; bottom: 0; width: 61rem; padding: 2rem 2.75rem 2.25rem; display: flex; flex-direction: column; }
+  .sheet .rule { margin: 1rem 0 0; }
+  .winner { font-size: 18.5rem; line-height: 0.8; letter-spacing: -0.012em; margin: 1.6rem 0 0 -0.4rem; }
+  .wins { font-size: 3.6rem; margin-top: 1.2rem; }
+  .line { margin-top: 1.5rem; border-top: var(--rule) solid var(--ink); }
+  .line .row { display: grid; grid-template-columns: 1.5rem 1fr 6rem; align-items: center; gap: 1.1rem; padding: 0.5rem 0 0.5rem 0.2rem; border-bottom: 0.19rem solid var(--ink); }
+  .line .row:last-child { border-bottom: var(--rule) solid var(--ink); }
+  .line .nm { font-size: 3.6rem; padding-top: 0.2rem; }
+  .line .gm { font-size: 5rem; text-align: center; padding: 0.2rem 0 0.4rem; }
+  .line .row.won .gm { background: var(--ink); color: var(--cream); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; margin-top: 1.5rem; }
+  .stats div + div { border-left: 0.19rem solid var(--ink); padding-left: 2rem; }
+  .stats dt { font-family: var(--text); font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; line-height: 1; color: var(--on-cream-2); }
+  .stats dd { font-family: var(--display); font-weight: 900; text-transform: uppercase; font-size: 5.6rem; line-height: 0.9; margin-top: 0.6rem; }
+  .stats dd small { font-size: 2.6rem; margin-left: 0.4rem; }
+  .acts { margin-top: auto; display: flex; gap: 1.25rem; align-items: center; }
+</style>
+</head>
+<body>
+<div class="scene" data-court="end"></div>
+<div class="stage"><main class="frame"><div class="safe">
+  <section class="sheet paper" aria-labelledby="win-h">
+    <p class="lab">Game, set and match</p>
+    <div class="rule"></div>
+    <h1 class="winner d" id="win-h">Gustav</h1>
+    <p class="wins d">beats The Wall in one set</p>
+    <div class="line" role="table" aria-label="Score line">
+      <div class="row won" role="row"><span class="fig c-apricot" aria-hidden="true"></span><span class="nm d" role="cell">Gustav</span><span class="gm d" role="cell">6</span></div>
+      <div class="row" role="row"><span class="fig hoop c-mint" aria-hidden="true"></span><span class="nm d" role="cell">The Wall</span><span class="gm d" role="cell">4</span></div>
+    </div>
+    <dl class="stats">
+      <div><dt>Best rally</dt><dd>23<small>shots</small></dd></div>
+      <div><dt>Fastest swing</dt><dd>112<small>km/h</small></dd></div>
+    </dl>
+    <div class="acts">
+      <button class="btn btn-primary" type="button" autofocus>Play again</button>
+      <button class="btn btn-ghost" type="button">Change setup</button>
+    </div>
+  </section>
+</div></main></div>
+<div class="grain" aria-hidden="true"></div>
+<script src="court.js"></script>
+</body>
+</html>

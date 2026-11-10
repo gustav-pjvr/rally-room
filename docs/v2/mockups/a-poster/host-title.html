@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" class="host">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rally Room | Title (direction A)</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .name { position: absolute; left: 0; top: 0.4rem; font-size: 16.6rem; line-height: 0.84; letter-spacing: -0.012em; color: var(--ink); }
+  .name span { display: block; }
+  .go { position: absolute; left: 0; bottom: 0; display: flex; align-items: stretch; }
+  .go .say { padding: 1.5rem 2.25rem 1.6rem; display: grid; align-content: center; gap: 0.5rem; }
+  .go .say .d { font-size: 3.75rem; }
+  .go .btn { font-size: 5rem; padding: 0 3.5rem 0.2rem; min-height: 8.5rem; }
+  .hint { position: absolute; right: 0; bottom: 0; padding: 0.9rem 1.25rem; display: flex; align-items: center; gap: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="scene" data-court="title"></div>
+<div class="stage"><main class="frame"><div class="safe">
+  <h1 class="name d"><span>Rally</span><span>Room</span></h1>
+  <div class="go">
+    <div class="say ink">
+      <p class="d">Your phone is the racket</p>
+      <p class="dim">Living-room tennis for one to four players.</p>
+    </div>
+    <button class="btn btn-primary" type="button" autofocus>Start</button>
+  </div>
+  <p class="hint ink"><span class="key">Enter</span> Start</p>
+</div></main></div>
+<div class="grain" aria-hidden="true"></div>
+<script src="court.js"></script>
+</body>
+</html>

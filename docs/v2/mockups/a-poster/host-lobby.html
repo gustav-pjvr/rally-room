@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en" class="host">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rally Room | Lobby (direction A)</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .lobby { display: grid; grid-template-columns: 30rem 1fr 31rem; grid-template-rows: 1fr auto; gap: 1.5rem; }
+
+  /* join: the loudest block on the screen */
+  .join { padding: 1.5rem 1.75rem 1.6rem; display: flex; flex-direction: column; align-self: start; }
+  .join .code { font-size: 11.6rem; line-height: 0.8; letter-spacing: 0.02em; margin: 0.9rem 0 1.1rem -0.2rem; }
+  .join .rule { margin-bottom: 1.4rem; }
+  .join .scan { display: grid; grid-template-columns: 17.3rem 1fr; gap: 1.2rem; align-items: start; }
+  .qr { width: 17.3rem; height: 17.3rem; display: block; }
+  .join .open { margin-top: 1.1rem; }
+  .join .scan .d { font-size: 3.1rem; line-height: 0.9; }
+  .join .scan p { margin-top: 0.8rem; }
+  .join .url { font-weight: 700; overflow-wrap: anywhere; }
+
+  /* players: two sides, cards float over the court */
+  .sides { display: flex; flex-direction: column; justify-content: space-between; min-height: 0; }
+  .side { display: grid; gap: 0.5rem; }
+  .side-head { display: flex; align-items: center; gap: 0.9rem; padding: 0.55rem 1.1rem; justify-self: start; }
+  .side-head .fig { width: 1rem; height: 2rem; }
+  .side-head .n { color: var(--on-ink-2); font-weight: 600; font-size: 1.75rem; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; min-height: 0; }
+  .card { padding: 1.1rem 1.3rem 1.3rem; display: grid; gap: 0.8rem; align-content: start; }
+  .card .who { display: flex; align-items: center; gap: 1rem; }
+  .card .who .fig { width: 1.9rem; height: 3.8rem; border-radius: 0.95rem; box-shadow: 0 0 0 0.2rem var(--cream); }
+  .card .who .d { font-size: 4rem; }
+  .state { display: flex; align-items: center; gap: 0.6rem; font-weight: 600; }
+  .state i { flex: none; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--cream); position: relative; }
+  .state i::after { content: ""; position: absolute; left: 0.5rem; top: 0.22rem; width: 0.45rem; height: 0.8rem; border: solid var(--ink); border-width: 0 0.2rem 0.2rem 0; transform: rotate(40deg); }
+  .state.waiting i { background: transparent; box-shadow: inset 0 0 0 0.2rem var(--cream); animation: wait 1.6s var(--ease) infinite; }
+  .state.waiting i::after { display: none; }
+  .meter { display: grid; grid-template-columns: auto 1fr; align-items: end; gap: 0.9rem; align-self: end; }
+  .meter .bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 0.25rem; align-items: end; height: 2rem; }
+  .meter .bars i { background: rgba(243, 233, 210, 0.22); height: 100%; }
+  .meter .bars i.on { background: var(--cream); }
+  .meter span { color: var(--on-ink-2); font-weight: 600; font-size: 1.75rem; line-height: 1; }
+  .card.open { background: var(--ink); color: var(--cream); outline: 0.19rem dashed var(--on-ink-2); outline-offset: -0.6rem; }
+  .card.open .d { font-size: 4rem; }
+
+  /* setup */
+  .setup { grid-row: 1 / span 2; grid-column: 3; padding: 1.5rem 1.6rem 1.5rem; display: flex; flex-direction: column; justify-content: space-between; }
+  .setup legend { margin-bottom: 0.7rem; padding: 0; color: var(--on-ink-2); }
+  .pick { display: grid; grid-template-columns: 3.4rem 1fr 3.4rem; align-items: center; gap: 0.5rem; }
+  .pick .d { font-size: 3.6rem; text-align: center; }
+  .pick button { width: 3.4rem; height: 3.4rem; background: transparent; border: 0; box-shadow: inset 0 0 0 0.16rem rgba(243, 233, 210, 0.42); display: grid; place-items: center; transition: transform 160ms var(--ease); }
+  .pick button:active { transform: scale(0.94); }
+  .pick button i { width: 0.9rem; height: 0.9rem; border: solid var(--cream); border-width: 0 0 0.25rem 0.25rem; transform: translateX(0.2rem) rotate(45deg); }
+  .pick button.next i { transform: translateX(-0.2rem) rotate(-135deg); }
+  .trait { margin: 0.6rem 0 0.8rem; min-height: 4.3rem; }
+  .setup .btn-primary { width: 100%; font-size: 4.25rem; min-height: 6.5rem; }
+  .back { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.9rem; background: none; border: 0; padding: 0.3rem 0; font-size: 1.75rem; font-weight: 600; color: var(--cream); }
+
+  /* first-session help */
+  .help { grid-column: 1 / span 2; padding: 1.3rem 1.75rem 1.5rem; }
+  .help h2 { font-size: 2.6rem; margin-bottom: 1rem; }
+  .help ol { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0.9rem 2.5rem; }
+  .help li { display: grid; grid-template-columns: 2rem 1fr; gap: 0.9rem; }
+  .help li b { font-family: var(--display); font-weight: 900; font-size: 2.6rem; line-height: 0.9; color: var(--on-cream-2); }
+  .help strong { font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="scene" data-court="lobby"></div>
+<div class="stage"><main class="frame"><div class="safe lobby">
+
+  <section class="join paper" aria-labelledby="code-lab">
+    <p class="lab" id="code-lab">Room code</p>
+    <p class="code d" aria-labelledby="code-lab">K7QM</p>
+    <div class="rule"></div>
+    <div class="scan">
+      <svg class="qr" id="qr" viewBox="0 0 33 33" role="img" aria-label="QR code with the phone link" shape-rendering="crispEdges"></svg>
+      <p class="d">Scan to grab a racket</p>
+    </div>
+    <p class="open"><span class="dim">or open</span> <span class="url">192.168.1.24:5280</span></p>
+  </section>
+
+  <section class="sides" aria-label="Players">
+    <div class="side">
+      <h2 class="side-head ink"><span class="fig hoop c-rose" aria-hidden="true"></span><span class="lab">Far side</span><span class="n">hooped shirts</span></h2>
+      <div class="cards">
+        <article class="card ink">
+          <div class="who"><span class="fig hoop c-rose" aria-hidden="true"></span><h3 class="d">Ramy</h3></div>
+          <p class="state"><i aria-hidden="true"></i>Connected</p>
+          <div class="meter"><span>Swing</span><div class="bars" role="img" aria-label="Last swing: medium"><i class="on" style="height:30%"></i><i class="on" style="height:36%"></i><i class="on" style="height:43%"></i><i class="on" style="height:50%"></i><i class="on" style="height:57%"></i><i class="on" style="height:64%"></i><i style="height:71%"></i><i style="height:78%"></i><i style="height:85%"></i><i style="height:90%"></i><i style="height:95%"></i><i></i></div></div>
+        </article>
+        <article class="card open">
+          <div class="who"><span class="fig hoop c-mint" aria-hidden="true"></span><h3 class="d">Open seat</h3></div>
+          <p class="state waiting"><i aria-hidden="true"></i>Waiting for a phone</p>
+          <p style="color:var(--on-ink-2)">The Fox plays until then.</p>
+        </article>
+      </div>
+    </div>
+    <div class="side">
+      <h2 class="side-head ink"><span class="fig c-apricot" aria-hidden="true"></span><span class="lab">Near side</span><span class="n">plain shirts</span></h2>
+      <div class="cards">
+        <article class="card ink">
+          <div class="who"><span class="fig c-apricot" aria-hidden="true"></span><h3 class="d">Gustav</h3></div>
+          <p class="state"><i aria-hidden="true"></i>Connected</p>
+          <div class="meter"><span>Swing</span><div class="bars" role="img" aria-label="Last swing: strong"><i class="on" style="height:30%"></i><i class="on" style="height:36%"></i><i class="on" style="height:43%"></i><i class="on" style="height:50%"></i><i class="on" style="height:57%"></i><i class="on" style="height:64%"></i><i class="on" style="height:71%"></i><i class="on" style="height:78%"></i><i class="on" style="height:85%"></i><i style="height:90%"></i><i style="height:95%"></i><i></i></div></div>
+        </article>
+        <article class="card ink">
+          <div class="who"><span class="fig c-plum" aria-hidden="true"></span><h3 class="d">Jaco</h3></div>
+          <p class="state"><i aria-hidden="true"></i>Connected</p>
+          <div class="meter"><span>Swing</span><div class="bars" role="img" aria-label="Last swing: soft"><i class="on" style="height:30%"></i><i class="on" style="height:36%"></i><i class="on" style="height:43%"></i><i style="height:50%"></i><i style="height:57%"></i><i style="height:64%"></i><i style="height:71%"></i><i style="height:78%"></i><i style="height:85%"></i><i style="height:90%"></i><i style="height:95%"></i><i></i></div></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <form class="setup ink" aria-label="Match setup" onsubmit="return false">
+    <fieldset>
+      <legend class="lab">Mode</legend>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="mode">Co-op singles</label>
+        <label class="opt"><input type="radio" name="mode">Co-op doubles</label>
+        <label class="opt"><input type="radio" name="mode" checked>Versus</label>
+        <label class="opt"><input type="radio" name="mode">Practice</label>
+        <label class="opt"><input type="radio" name="mode">Tutorial</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend class="lab">CPU player</legend>
+      <div class="pick">
+        <button type="button" aria-label="Previous CPU player"><i aria-hidden="true"></i></button>
+        <p class="d" id="cpu-name" aria-live="polite">The Fox</p>
+        <button type="button" class="next" aria-label="Next CPU player"><i aria-hidden="true"></i></button>
+      </div>
+      <p class="trait" id="cpu-trait">Sharp angles, slice and the odd drop shot.</p>
+      <div class="opts row" role="group" aria-label="CPU level">
+        <label class="opt"><input type="radio" name="level">Rookie</label>
+        <label class="opt"><input type="radio" name="level" checked>Club</label>
+        <label class="opt"><input type="radio" name="level">Pro</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend class="lab">Match length</legend>
+      <div class="opts row">
+        <label class="opt"><input type="radio" name="len">1 game</label>
+        <label class="opt"><input type="radio" name="len" checked>3 games</label>
+        <label class="opt"><input type="radio" name="len">1 set</label>
+      </div>
+    </fieldset>
+    <div>
+      <button class="btn btn-primary" type="submit">Start match</button>
+      <button class="back" type="button"><span class="key">Esc</span> Back</button>
+    </div>
+  </form>
+
+  <section class="help paper" aria-labelledby="help-h">
+    <h2 class="d" id="help-h">First time here? Four things</h2>
+    <ol>
+      <li><b>1</b><span>Phone and this screen on the <strong>same Wi-Fi</strong>.</span></li>
+      <li><b>2</b><span>The phone warns about a certificate once: tap <strong>Advanced</strong>, then <strong>Proceed</strong>.</span></li>
+      <li><b>3</b><span>Tap <strong>Allow motion</strong> when the phone asks.</span></li>
+      <li><b>4</b><span>Page will not load? Allow <strong>Node.js</strong> through the Windows firewall on private networks.</span></li>
+    </ol>
+  </section>
+
+</div></main></div>
+<div class="grain" aria-hidden="true"></div>
+<script src="court.js"></script>
+<script>
+// A real-looking QR pattern (finder, timing and alignment marks, seeded fill). Not a scannable code.
+(function () {
+  var N = 29, q = 2, m = [], r, c, seed = 20261110;
+  function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+  for (r = 0; r < N; r++) { m[r] = []; for (c = 0; c < N; c++) m[r][c] = rnd() < 0.48 ? 1 : 0; }
+  function finder(R, Cc) {
+    for (var i = -1; i <= 7; i++) for (var j = -1; j <= 7; j++) {
+      var y = R + i, x = Cc + j; if (y < 0 || x < 0 || y >= N || x >= N) continue;
+      var ring = Math.max(Math.abs(i - 3), Math.abs(j - 3));
+      m[y][x] = (ring === 3 || ring <= 1) ? 1 : 0;
+    }
+  }
+  finder(0, 0); finder(0, N - 7); finder(N - 7, 0);
+  for (var i = 8; i < N - 8; i++) { m[6][i] = m[i][6] = i % 2 === 0 ? 1 : 0; }
+  for (var a = -2; a <= 2; a++) for (var b = -2; b <= 2; b++) m[22 + a][22 + b] = Math.max(Math.abs(a), Math.abs(b)) !== 1 ? 1 : 0;
+  var s = '<rect width="33" height="33" fill="#F3E9D2"/>';
+  for (r = 0; r < N; r++) for (c = 0; c < N; c++) if (m[r][c]) s += '<rect x="' + (c + q) + '" y="' + (r + q) + '" width="1.02" height="1.02" fill="#1B1B1E"/>';
+  document.getElementById('qr').innerHTML = s;
+})();
+// CPU picker: shows the state change without a build step.
+(function () {
+  var cast = [['The Regular', 'Does a bit of everything.'], ['The Wall', 'Gets everything back, high and deep.'], ['The Cannon', 'Hits flat and hard, and misses a few.'], ['The Fox', 'Sharp angles, slice and the odd drop shot.'], ['The Ace', 'A huge first serve, an ordinary rally.']], at = 3;
+  document.querySelectorAll('.pick button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      at = (at + (b.classList.contains('next') ? 1 : cast.length - 1)) % cast.length;
+      document.getElementById('cpu-name').textContent = cast[at][0];
+      document.getElementById('cpu-trait').textContent = cast[at][1];
+    });
+  });
+})();
+</script>
+</body>
+</html>
