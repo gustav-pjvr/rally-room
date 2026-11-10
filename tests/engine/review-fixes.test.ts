@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   HIT_WINDOW_MS, MISS_GRACE_MS, TOSS, createMatch, type GameMatch, type MatchOptions,
-} from '../../src/host/game/match';
-import { type MatchConfig, type MatchEvent } from '../../src/host/game/types';
+} from '../../src/engine/match';
+import { type MatchConfig, type MatchEvent } from '../../src/engine/types';
 
 /** Regression tests for the four findings of the independent review of the rules engine. */
 

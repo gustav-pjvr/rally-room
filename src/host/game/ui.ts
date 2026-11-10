@@ -4,7 +4,7 @@
  * here; the main wiring hears about the ones that matter through handlers.
  */
 import QRCode from 'qrcode';
-import type { HitWindow, Level, MatchConfig, MatchLength, MatchView, Side } from './types';
+import type { HitWindow, Level, MatchConfig, MatchLength, MatchView, Side } from '../../engine/types';
 
 export type Screen = 'title' | 'setup' | 'match' | 'pause' | 'end';
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CONTACT, SWEET_SPOT, alongFromTiming, classify, heightPush, locateContact, locateServeContact, reachAwkwardness,
   rushedFrom, shank, strikeEffect, sweetDistance, tiltLaunch, type ContactInput,
-} from '../../src/host/game/contact';
-import { createRng } from '../../src/host/game/rng';
+} from '../../src/engine/contact';
+import { createRng } from '../../src/engine/rng';
 
 /** gauss() with this source returns (almost exactly) 0: cos(2 pi 0.25) = 0. A noise-free contact. */
 const still = () => 0.25;

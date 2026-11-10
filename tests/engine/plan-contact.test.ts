@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { HUMAN, planContact, type Mover } from '../../src/host/game/ai';
-import { buildPath, vec, type BallPath } from '../../src/host/game/physics';
+import { HUMAN, planContact, type Mover } from '../../src/engine/ai';
+import { buildPath, vec, type BallPath } from '../../src/engine/physics';
 
 const ROOM = 0.208; // ACCEPT * W on Normal, s
 

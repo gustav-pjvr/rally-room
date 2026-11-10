@@ -3,8 +3,8 @@ import {
   assignPlayers, ChangeFilter, eventMessages, gameMessages, gameState, matchIdentity, MAX_NAME,
   playerOfSlot, safeColor, scoreText, shortName, suggestedHumans, youMessages, type Phone, type PhoneMessage,
 } from '../../src/host/phones';
-import { createMatch } from '../../src/host/game/match';
-import type { MatchEvent, MatchView } from '../../src/host/game/types';
+import { createMatch } from '../../src/engine/match';
+import type { MatchEvent, MatchView } from '../../src/engine/types';
 
 const phone = (slot: number, seq: number, extra: Partial<Phone> = {}): Phone =>
   ({ slot, name: `P${slot}`, color: null, connected: true, seq, ...extra });

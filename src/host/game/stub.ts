@@ -3,7 +3,7 @@
  * so the renderer and UI can be looked at without the rules engine.
  * Pure function of time: stubView(t) is the same for the same t.
  */
-import { COURT, type MatchView, type PlayerView, type Vec3 } from './types';
+import { COURT, type MatchView, type PlayerView, type Vec3 } from '../../engine/types';
 
 const G = 9.81;
 const SERVE_AT = 900;

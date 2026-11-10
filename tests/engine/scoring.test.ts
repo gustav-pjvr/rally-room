@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   awardPoint, createScore, scoreView, serveCourt, tiebreakServer, type ScoreState,
-} from '../../src/host/game/scoring';
-import type { Side } from '../../src/host/game/types';
+} from '../../src/engine/scoring';
+import type { Side } from '../../src/engine/types';
 
 const play = (state: ScoreState, winners: string) => {
   let s = state;

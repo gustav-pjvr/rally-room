@@ -1,15 +1,16 @@
 {
   "name": "rally-room",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.0.0-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc --noEmit && vitest run",
-    "e2e": "node e2e/run-all.mjs"
+    "verify": "tsc --noEmit && vitest run && node scripts/scan.mjs",
+    "e2e": "node e2e/run-all.mjs",
+    "scan": "node scripts/scan.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

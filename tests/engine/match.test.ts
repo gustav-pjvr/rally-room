@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACCEPT, HIT_WINDOW_MS, MISS_GRACE_MS, TOSS, createMatch, type GameMatch, type MatchOptions,
-} from '../../src/host/game/match';
-import { COURT, type MatchConfig, type MatchEvent } from '../../src/host/game/types';
+} from '../../src/engine/match';
+import { COURT, type MatchConfig, type MatchEvent } from '../../src/engine/types';
 
 const FRAME = 1000 / 60;
 const BASE: MatchConfig = { mode: 'singles', humans: 1, level: 'rookie', window: 'normal', length: 'set1', seed: 1 };

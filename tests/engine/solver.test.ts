@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { GROUND_Y, buildPath, predictLanding, vec } from '../../src/host/game/physics';
-import { createRng, uniform } from '../../src/host/game/rng';
-import { NET_CLEARANCE, heightAtNet, solveShot } from '../../src/host/game/solver';
-import { COURT } from '../../src/host/game/types';
+import { GROUND_Y, buildPath, predictLanding, vec } from '../../src/engine/physics';
+import { createRng, uniform } from '../../src/engine/rng';
+import { NET_CLEARANCE, heightAtNet, solveShot } from '../../src/engine/solver';
+import { COURT } from '../../src/engine/types';
 
 describe('shot solver', () => {
   it('lands exactly on the target and clears the net by 0.15 m (1000 random shots)', () => {

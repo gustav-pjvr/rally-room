@@ -152,7 +152,7 @@ export function rippleStyle(quality: number) {
   };
 }
 
-/** The sweet spot along the racket (a), as on the host (src/host/game/contact.ts SWEET_SPOT). */
+/** The sweet spot along the racket (a), as on the host (src/engine/contact.ts SWEET_SPOT). */
 export const SWEET_SPOT_A = -0.15;
 
 /**

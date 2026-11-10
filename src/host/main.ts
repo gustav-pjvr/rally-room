@@ -17,8 +17,8 @@ import { createRenderer } from './game/render';
 import { createAudio } from './game/audio';
 import { createUi, type LobbyCard } from './game/ui';
 import { stubView } from './game/stub';
-import { createMatch, type GameMatch } from './game/match';
-import type { MatchConfig, MatchEvent, MatchView, Vec3 } from './game/types';
+import { createMatch, type GameMatch } from '../engine/match';
+import type { MatchConfig, MatchEvent, MatchView, Vec3 } from '../engine/types';
 import { hostConnection, type PhoneMode } from './net';
 import {
   assignPlayers, byJoinOrder, ChangeFilter, createSeats, DEFAULT_COLORS, eventMessages, expiredSlots, gameMessages,

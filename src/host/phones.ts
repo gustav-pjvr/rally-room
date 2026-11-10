@@ -4,7 +4,7 @@
  * messages each playing phone is sent. No DOM, no sockets, so it is unit
  * tested (tests/host/phones.test.ts).
  */
-import type { MatchConfig, MatchEvent, MatchView } from './game/types';
+import type { MatchConfig, MatchEvent, MatchView } from '../engine/types';
 
 /** One phone the host knows about, by relay slot (1 to 4). */
 export interface Phone {

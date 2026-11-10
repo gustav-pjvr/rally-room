@@ -4,7 +4,7 @@
  * never changes game state. render() allocates nothing per frame.
  */
 import * as THREE from 'three';
-import { COURT, type MatchView, type PlayerView } from './types';
+import { COURT, type MatchView, type PlayerView } from '../../engine/types';
 
 export interface Renderer {
   render(view: MatchView, now: number): void;

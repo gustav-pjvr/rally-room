@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   GROUND_Y, accelY, bounceVelocity, buildPath, netCrossing, pathPosition, positionAt, predictLanding,
   timeToHeight, vec, velocityAt,
-} from '../../src/host/game/physics';
-import { COURT } from '../../src/host/game/types';
+} from '../../src/engine/physics';
+import { COURT } from '../../src/engine/types';
 
 describe('ball physics', () => {
   it('uses a = -(9.81 + 6 spin) and no drag', () => {

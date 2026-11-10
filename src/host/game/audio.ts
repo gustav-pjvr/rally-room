@@ -3,7 +3,7 @@
  * created in unlock(), which must run inside a user gesture; until then
  * play() is silent.
  */
-import type { MatchEvent, MatchView } from './types';
+import type { MatchEvent, MatchView } from '../../engine/types';
 
 export interface GameAudio {
   /** Call from the first user click or key press. Safe to call again. */
