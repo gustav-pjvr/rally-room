@@ -1,6 +1,7 @@
 # Rally Room | handover
 
-Written 2026-11-10 at the end of the first build session. Read this first,
+Written 2026-11-10 at the end of the first build session; updated 2026-11-10
+in the second session (handover committed, rebuild under discussion, see below). Read this first,
 then `docs/DESIGN.md` (the full design, with what was measured and why).
 
 ## What it is
@@ -17,7 +18,7 @@ doubles with up to two phones. Repo: https://github.com/gustav-pjvr/rally-room
 | `00e5e26` | Phases 1 to 3: sensor lab, relay, swing detection, automatic phone setup, full game, phones in the game |
 | `51ec62d` | Racket contact model (where the ball meets the face shapes every shot), fixed spin rule |
 | `a000107` | Optional per-player spin calibration |
-| (next) | This handover, doc updates, browser checks moved into `e2e/` with `npm run verify` and `npm run e2e` |
+| `eff0cc8` | This handover, doc updates, browser checks moved into `e2e/` with `npm run verify` and `npm run e2e` |
 
 All 198 unit tests pass. Every change so far went through an independent Opus
 review and a re-check of the fixes.
@@ -52,6 +53,15 @@ npm run e2e        # every browser check, needs `npm run dev` running; Chrome at
 - Android axis conventions are measured (A32). **iPhone is untested**: the household has no iPhone. The axis calibrator is the safety net.
 - Public repo hygiene: commits use the GitHub noreply address (repo-local git config), `.gitattributes` pins LF (the CSV fixtures break with CRLF). Never put organisation names or email addresses in the repo (see the project memory note on not inferring from account context).
 - No licence chosen yet (question asked, not answered: MIT or all rights reserved).
+
+## v2 rebuild (agreed 2026-11-10)
+
+An autonomous Fable 5.2 session rebuilds the game on branch `v2`, using this
+build as the reference for the idea and owning every decision until done. The
+full brief is `docs/v2/BRIEF.md`. Gustav agreed: work on `v2` only, push `v2`
+but deploy nothing, split-screen versus is in scope for v2, subagents allowed,
+no time or token ceiling, an optional player simulator. `main` stays the
+playable v1; the items below apply to it.
 
 ## Open items, in a sensible order
 
