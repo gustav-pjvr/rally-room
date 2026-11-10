@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "verify": "tsc --noEmit && vitest run && node scripts/scan.mjs",
     "e2e": "node e2e/run-all.mjs",
-    "scan": "node scripts/scan.mjs"
+    "scan": "node scripts/scan.mjs",
+    "test:worker": "vitest run --config tests/relay/vitest.worker.config.ts",
+    "worker:dev": "wrangler dev --config worker/wrangler.jsonc"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
@@ -27,6 +29,7 @@
     "playwright-core": "^1.65.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.7",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "wrangler": "4.153.0"
   }
 }

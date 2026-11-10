@@ -1,0 +1,15 @@
+// The relay as a Cloudflare Worker with one Durable Object per room (worker/index.ts, worker/room.ts).
+// Local only: `npm run worker:dev` runs it under workerd with no account. Nothing here is deployed.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "rally-room-relay",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RelayRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
+  // The built site (npm run build), served for every path that is not a relay path.
+  "assets": { "directory": "../dist", "binding": "ASSETS" },
+  "observability": { "enabled": false }
+}

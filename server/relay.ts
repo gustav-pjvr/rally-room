@@ -1,176 +1,99 @@
-import type { Server as HttpServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+// The Node adapter: the relay core (server/core.ts) behind a `ws` server on the dev server's HTTP
+// server. Paths (docs/v2/PROTOCOL.md): `/ws/host` creates a room, `/ws/room/<code>` joins or resumes
+// one, and `/ws` is the v1 endpoint, kept here until the clients move to the v2 paths.
+import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import type { Duplex } from 'node:stream';
+import { randomFillSync, randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
-import {
-  parseMessage, PHONE_TYPES, RELAY_HEARTBEAT_MS, ROOM_ALPHABET, SLOT_COUNT, SLOT_HOLD_MS, type WireMessage,
-} from '../src/shared/protocol';
+import { MAX_FRAME_BYTES, RELAY_HEARTBEAT_MS } from '../src/shared/protocol';
+import { RelayCore, endpointFor, type Action, type CoreOptions } from './core';
 
-interface Player { pid: string; name: string; peer?: string; leftAt?: number }
-interface Room { host: string; players: Map<number, Player> }
-interface Membership { room: string; slot?: number }
-export interface Delivery { peer: string; message: WireMessage }
+export { RelayCore, endpointFor } from './core';
 
-export class Rooms {
-  private rooms = new Map<string, Room>();
-  private members = new Map<string, Membership>();
-
-  constructor(private random: () => number = Math.random) {}
-
-  createRoom(host: string): Delivery[] {
-    if (this.members.has(host)) return this.error(host, 'already-connected');
-    const capacity = ROOM_ALPHABET.length ** 4;
-    const start = Math.floor(this.random() * capacity) % capacity;
-    for (let attempt = 0; attempt < capacity; attempt++) {
-      let value = (start + attempt) % capacity;
-      let code = '';
-      for (let i = 0; i < 4; i++) {
-        code = ROOM_ALPHABET[value % ROOM_ALPHABET.length] + code;
-        value = Math.floor(value / ROOM_ALPHABET.length);
-      }
-      if (this.rooms.has(code)) continue;
-      this.rooms.set(code, { host, players: new Map() });
-      this.members.set(host, { room: code });
-      return [{ peer: host, message: { t: 'room', code } }];
-    }
-    return this.error(host, 'full');
-  }
-
-  join(peer: string, code: string, name: string, pid: string, now: number): Delivery[] {
-    if (this.members.has(peer)) return this.error(peer, 'already-connected');
-    const room = this.rooms.get(code);
-    if (!room) return this.error(peer, 'no-room');
-    if (!pid || !name.trim() || pid.length > 128 || name.length > 40) return this.error(peer, 'invalid-join');
-    // A pid already in the room gets its own slot back, even after the hold expired, as long as
-    // nobody else took it (then its record would have been replaced). A held slot is not free;
-    // an expired one is, and its record is replaced when someone else takes it.
-    const existing = [...room.players].find(([, player]) => player.pid === pid);
-    const free = (candidate: number) => {
-      const player = room.players.get(candidate);
-      return !player || (!player.peer && now - (player.leftAt ?? now) >= SLOT_HOLD_MS);
-    };
-    const slot = existing?.[0] ?? Array.from({ length: SLOT_COUNT }, (_, i) => i + 1).find(free);
-    if (!slot) return this.error(peer, 'full');
-    const deliveries: Delivery[] = [];
-    if (existing?.[1].peer) {
-      const oldPeer = existing[1].peer;
-      this.members.delete(oldPeer);
-      deliveries.push(...this.error(oldPeer, 'rejoined'));
-    }
-    room.players.set(slot, { pid, name: name.trim(), peer });
-    this.members.set(peer, { room: code, slot });
-    deliveries.push(
-      { peer, message: { t: 'joined', slot } },
-      { peer: room.host, message: { t: 'player', slot, name: name.trim(), state: 'in', id: pid } },
-    );
-    return deliveries;
-  }
-
-  leave(peer: string, now: number): Delivery[] {
-    const member = this.members.get(peer);
-    if (!member) return [];
-    this.members.delete(peer);
-    const room = this.rooms.get(member.room)!;
-    if (member.slot === undefined) {
-      this.rooms.delete(member.room);
-      const deliveries: Delivery[] = [];
-      for (const player of room.players.values()) {
-        if (!player.peer) continue;
-        this.members.delete(player.peer);
-        deliveries.push({ peer: player.peer, message: { t: 'host-gone' } });
-      }
-      return deliveries;
-    }
-    const player = room.players.get(member.slot)!;
-    player.peer = undefined;
-    player.leftAt = now;
-    return [{ peer: room.host, message: {
-      t: 'player', slot: member.slot, name: player.name, state: 'out', id: player.pid,
-    } }];
-  }
-
-  forward(peer: string, message: WireMessage): Delivery[] {
-    const member = this.members.get(peer);
-    if (!member) return [];
-    const room = this.rooms.get(member.room)!;
-    if (member.slot !== undefined) {
-      // A phone may only send phone messages: never 'player', 'room' or anything the host trusts from the relay.
-      if (!PHONE_TYPES.includes(message.t)) return [];
-      return [{ peer: room.host, message: { ...message, slot: member.slot } }];
-    }
-    if (typeof message.to !== 'number') return [];
-    const target = room.players.get(message.to)?.peer;
-    return target ? [{ peer: target, message: { ...message } }] : [];
-  }
-
-  private error(peer: string, reason: string): Delivery[] {
-    return [{ peer, message: { t: 'error', reason } }];
-  }
-}
-
-export interface RelayOptions {
-  /** How often every socket is pinged; one that did not pong since the last ping is terminated. */
+export interface RelayOptions extends Partial<Omit<CoreOptions, 'randomBytes'>> {
+  /** How often every socket is pinged (ws protocol ping); the core closes one silent for `idleMs`. */
   heartbeatMs?: number;
 }
 
 export function attachRelay(httpServer: HttpServer, path = '/ws', options: RelayOptions = {}) {
-  const rooms = new Rooms();
+  const heartbeatMs = options.heartbeatMs ?? RELAY_HEARTBEAT_MS;
+  const core = new RelayCore({
+    idleMs: Math.round(heartbeatMs * 2.5),
+    ...options,
+    randomBytes: (length) => randomFillSync(new Uint8Array(length)),
+  });
   const sockets = new Map<string, WebSocket>();
-  const alive = new WeakSet<WebSocket>();
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-  const deliver = (messages: Delivery[]) => {
-    for (const { peer, message } of messages) {
-      const socket = sockets.get(peer);
-      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  // maxPayload: ws stops reading a bigger frame and closes the socket with 1009 without buffering it.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  let revision = -1;
+
+  const run = (actions: Action[]) => {
+    for (const action of actions) {
+      const socket = sockets.get(action.peer);
+      if (!socket) continue;
+      if (action.kind === 'send') {
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(action.message));
+      } else {
+        sockets.delete(action.peer);
+        socket.close(action.code, action.reason);
+        // A peer that ignores the close handshake is cut off.
+        setTimeout(() => socket.terminate(), 2000).unref?.();
+      }
     }
+    if (core.revision !== revision) arm();
   };
-  const upgrade: Parameters<HttpServer['on']>[1] = (request, socket, head) => {
-    if (request.url?.split('?')[0] !== path) return;
-    wss.handleUpgrade(request, socket, head, (ws) => wss.emit('connection', ws));
+  // One timer for the next hold or handshake expiry, re-armed whenever the rooms change.
+  const arm = () => {
+    revision = core.revision;
+    if (deadline) clearTimeout(deadline);
+    deadline = undefined;
+    const next = core.nextDeadline();
+    if (next === undefined) return;
+    deadline = setTimeout(() => { run(core.tick(Date.now())); arm(); }, Math.max(0, next - Date.now()) + 5);
+    deadline.unref?.();
+  };
+
+  const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const endpoint = endpointFor(request.url, path);
+    if (!endpoint) return;
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      const peer = randomUUID();
+      sockets.set(peer, ws);
+      ws.on('pong', () => core.seen(peer, Date.now()));
+      ws.on('error', () => ws.terminate());
+      ws.on('message', (data, binary) => {
+        if (!sockets.has(peer)) return;
+        const text = binary ? null : (Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data)).toString('utf8');
+        run(core.receive(peer, text, Date.now()));
+      });
+      ws.on('close', () => {
+        sockets.delete(peer);
+        run(core.close(peer, Date.now()));
+      });
+      run(core.open(peer, endpoint, Date.now(), request.socket.remoteAddress ?? ''));
+    });
   };
   httpServer.on('upgrade', upgrade);
-  wss.on('connection', (socket) => {
-    const peer = randomUUID();
-    sockets.set(peer, socket);
-    alive.add(socket);
-    socket.on('pong', () => alive.add(socket));
-    socket.on('error', () => socket.close());
-    socket.on('message', (data, binary) => {
-      const message = binary ? null : parseMessage(data.toString());
-      if (!message) {
-        socket.send(JSON.stringify({ t: 'error', reason: 'invalid-message' }));
-        return;
-      }
-      if (message.t === 'host') deliver(rooms.createRoom(peer));
-      else if (message.t === 'join') {
-        if (typeof message.room !== 'string' || typeof message.name !== 'string' || typeof message.pid !== 'string') {
-          socket.send(JSON.stringify({ t: 'error', reason: 'invalid-join' }));
-          return;
-        }
-        deliver(rooms.join(peer, message.room.toUpperCase(), message.name, message.pid, Date.now()));
-      } else deliver(rooms.forward(peer, message));
-    });
-    socket.on('close', () => {
-      sockets.delete(peer);
-      deliver(rooms.leave(peer, Date.now()));
-    });
-  });
-  // Liveness: a frozen page or a phone that left Wi-Fi keeps its TCP socket open for minutes.
-  // Terminating it fires 'close', which frees the slot as for any other drop.
+
+  // Liveness: a frozen page or a phone that left Wi-Fi keeps its TCP socket open for minutes. Every
+  // socket is pinged; one the core has not heard from for idleMs is closed, which frees its place.
   const heartbeat = setInterval(() => {
     for (const socket of sockets.values()) {
-      if (!alive.has(socket)) { socket.terminate(); continue; }
-      alive.delete(socket);
       try { socket.ping(); } catch { socket.terminate(); }
     }
-  }, options.heartbeatMs ?? RELAY_HEARTBEAT_MS);
+    run(core.tick(Date.now()));
+  }, heartbeatMs);
   heartbeat.unref?.();
+
   const close = () => {
     clearInterval(heartbeat);
+    if (deadline) clearTimeout(deadline);
     httpServer.off('upgrade', upgrade);
     httpServer.off('close', close);
     for (const socket of sockets.values()) socket.terminate();
     wss.close();
   };
   httpServer.once('close', close);
-  return { close, wss };
+  return { close, wss, core };
 }
