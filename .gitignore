@@ -5,3 +5,4 @@ dist/
 !tests/fixtures/*.csv
 e2e/shots/
 .scan-deny.local
+docs/v2/mockups/*/shots/
